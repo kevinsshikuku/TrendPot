@@ -1,0 +1,10 @@
+node_modules
+.DS_Store
+pnpm-lock.yaml
+.next
+out
+coverage
+/dist
+/apps/**/.next
+/apps/**/dist
+/apps/**/build

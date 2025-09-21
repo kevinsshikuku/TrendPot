@@ -1,3 +1,18 @@
+# TrendPot Monorepo
+
+This repository is now bootstrapped with a Turborepo workspace that hosts the customer-facing web application, NestJS API, background worker, and shared packages. The long-form product and architecture brief that follows remains unchanged for reference.
+
+## Getting started
+
+```bash
+pnpm install
+pnpm dev
+```
+
+The `pnpm dev` script runs all dev servers declared in the workspace via Turbo. Each package can also be developed individually (see `apps/` and `packages/`).
+
+---
+
 # TrendPot
 PWA that ranks top TikTok challenge videos (consenting creators) and powers fan donations via M-Pesa. Stack: Next.js (PWA) • NestJS • MongoDB Atlas • Redis • BullMQ.
 
