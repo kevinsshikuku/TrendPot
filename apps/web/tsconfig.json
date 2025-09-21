@@ -1,0 +1,11 @@
+{
+  "extends": "../../packages/config/tsconfig/next.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@trendpot/ui": ["../../packages/ui/src"],
+      "@trendpot/utils": ["../../packages/utils/src"],
+      "@trendpot/types": ["../../packages/types/src"]
+    }
+  }
+}

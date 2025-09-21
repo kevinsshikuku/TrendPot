@@ -1,0 +1,28 @@
+{
+  "name": "worker",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint \"src/**/*.{ts,tsx}\"",
+    "format": "prettier --check \"src/**/*.{ts,tsx}\""
+  },
+  "dependencies": {
+    "bullmq": "4.11.4",
+    "ioredis": "5.4.1",
+    "@trendpot/types": "workspace:*",
+    "@trendpot/utils": "workspace:*"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "7.5.0",
+    "@typescript-eslint/parser": "7.5.0",
+    "eslint": "8.57.0",
+    "eslint-config-prettier": "9.1.0",
+    "prettier": "3.2.5",
+    "tsx": "4.7.2",
+    "typescript": "5.4.5",
+    "@types/node": "20.12.7"
+  }
+}
