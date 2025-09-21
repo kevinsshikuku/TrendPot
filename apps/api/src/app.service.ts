@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { ChallengeSummary } from "@trendpot/types";
+import type { ChallengeSummary, ListChallengesParams } from "@trendpot/types";
 
 const demoChallenges: ChallengeSummary[] = [
   {
@@ -22,7 +22,25 @@ const demoChallenges: ChallengeSummary[] = [
 
 @Injectable()
 export class AppService {
-  getFeaturedChallenges(): ChallengeSummary[] {
+  getFeaturedChallenges(params: ListChallengesParams = {}): ChallengeSummary[] {
+    const limit = sanitizeLimit(params.limit);
+
+    if (typeof limit === "number") {
+      return demoChallenges.slice(0, limit);
+    }
+
     return demoChallenges;
   }
 }
+
+const sanitizeLimit = (limit: ListChallengesParams["limit"]): number | undefined => {
+  if (typeof limit !== "number") {
+    return undefined;
+  }
+
+  if (!Number.isFinite(limit) || limit <= 0) {
+    return undefined;
+  }
+
+  return Math.floor(limit);
+};
