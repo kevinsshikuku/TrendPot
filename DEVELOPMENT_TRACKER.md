@@ -10,17 +10,17 @@
 - **Authentication Principle**: All identity, session, and authorization capabilities must be implemented in-house. Do not integrate paid third-party auth providers (e.g., Clerk).
 - **Design Principle**: Every feature must account for desktop and mobile breakpoints; capture responsive mockups/wireframes before implementation and store references in design documentation.
 
-## Current State Overview (Last Updated: 2025-09-25)
+## Current State Overview (Last Updated: 2025-10-11)
 
 ### Frontend (Next.js PWA)
 - **Status**: ▣
-- **Snapshot**: Admin challenge management flows support create/edit/archive with responsive forms, validation feedback, and analytics-driven listings; public surfaces still lack navigation, auth gating, and install prompts.
-- **Implementation Notes**: Responsive component library now covers admin dashboards but must extend to public donation and creator experiences for full desktop/mobile parity.
+- **Snapshot**: Admin challenge management flows support create/edit/archive with responsive forms, validation feedback, and analytics-driven listings; public surfaces stay guest-friendly for browsing challenges while TikTok-only login CTAs gate account experiences, though global navigation and install prompts remain outstanding.
+- **Implementation Notes**: Responsive component library now covers admin dashboards and TikTok auth entry points—next, extend patterns to donation and creator browsing flows and add mobile-first navigation for guests.
 
 ### Backend & GraphQL API (NestJS + Mercurius)
 - **Status**: ▣
-- **Snapshot**: GraphQL schema exposes full challenge lifecycle mutations (create/update/archive) with optimistic locking and status transition enforcement alongside listing analytics.
-- **Implementation Notes**: Authentication, rate limiting, and additional domain models (donations, submissions, payouts) remain unimplemented.
+- **Snapshot**: GraphQL schema exposes full challenge lifecycle mutations (create/update/archive) with optimistic locking, status transition enforcement, TikTok login mutations, and listing analytics.
+- **Implementation Notes**: TikTok OAuth + session issuance now ship with Redis-backed state and rate limiting; next milestones cover donations, submissions, payouts, and richer audit/reporting domains.
 
 ### Worker (BullMQ)
 - **Status**: ☐
@@ -30,7 +30,7 @@
 ### Shared Types & Contracts
 - **Status**: ▣
 - **Snapshot**: Zod schemas cover challenges, lifecycle statuses, optimistic locking payloads, and a minimal leaderboard payload.
-- **Implementation Notes**: User, donation, submission, auth, and webhook envelopes are missing from shared contracts.
+- **Implementation Notes**: User/auth/session contracts now back TikTok login flows; donation, submission, payout, and webhook envelopes are the next gaps to close.
 
 ### UI/UX & Design System
 - **Status**: ☐
@@ -38,9 +38,9 @@
 - **Implementation Notes**: Establish responsive design tokens and component patterns that address both desktop and mobile breakpoints.
 
 ### Security Measures
-- **Status**: ☐
-- **Snapshot**: CORS accepts any origin, Helmet is absent, and request throttling is not configured.
-- **Implementation Notes**: Credentials live in environment variables without documented rotation guidance; introduce in-house controls.
+- **Status**: ▣
+- **Snapshot**: Fastify now ships with Helmet, an env-driven CORS allowlist, TikTok-only login/session cookies, and Redis-backed rate limits on sensitive resolvers.
+- **Implementation Notes**: Document credential rotation/KMS flows, expand anomaly detection, and wire webhook signing before enabling donations or payouts.
 
 ### Observability & Testing
 - **Status**: ☐
@@ -58,16 +58,16 @@
 - **Implementation Notes**: This tracker now consolidates state and milestones for a single glance across teams.
 
 ### Frontend Snapshot
-- **Routing & Data**: Admin routes deliver create/edit forms that hydrate React Query caches, process GraphQL validation errors, and surface challenge analytics with server-driven pagination and filters. Public routes (`/`, `/challenges`, `/c/[id]`) still present placeholder KPIs and lack authenticated flows for donations or submissions.
-- **State Management**: React Query client is initialized globally; admin workflows incorporate optimistic updates and cache invalidation, while public error/loading states remain basic and not mobile-optimized.
+- **Routing & Data**: Admin routes deliver create/edit forms that hydrate React Query caches, process GraphQL validation errors, and surface challenge analytics with server-driven pagination and filters. Public routes (`/`, `/challenges`, `/c/[id]`) keep placeholder KPIs but allow guest browsing, while `/login` and `/signup` now funnel into the TikTok OAuth bridge via Next API routes.
+- **State Management**: React Query client is initialized globally; admin workflows incorporate optimistic updates and cache invalidation, and viewer/session queries hydrate after TikTok login, though public error/loading states remain basic and not mobile-optimized.
 - **Responsiveness**: Admin dashboards render responsive tables/cards with mobile-first layouts; broader site still needs dedicated mobile navigation, sticky CTAs, and adaptive typography tokens for parity.
 - **Installability**: No web app manifest, service worker, or offline caching strategy is implemented despite PWA goals.
 
 ### Backend & API Snapshot
-- **Schema Coverage**: GraphQL exposes challenge queries plus create/update/archive mutations with lifecycle status enums, optimistic locking inputs, and analytics fields; donations, submissions, TikTok content, and auth endpoints are still missing.
-- **Business Logic**: Challenge service enforces version checks and allowable status transitions before persistence but continues to lack authorization, rate limiting, and audit logging. Validation beyond Nest defaults is minimal.
-- **Persistence**: `ChallengeEntity` includes lifecycle metadata; collections for users, donations, payouts, submissions, OAuth tokens, and audit trails must be modeled to meet roadmap requirements.
-- **Security**: API accepts cross-origin requests (`origin: true`) with credentials; Helmet and throttlers are not configured. Secrets are expected via environment variables without rotation playbooks.
+- **Schema Coverage**: GraphQL exposes challenge queries, lifecycle mutations, viewer/session lookups, and TikTok login mutations; donations, submissions, payouts, and richer analytics remain unimplemented.
+- **Business Logic**: Challenge service enforces version checks with role/rate-limit guards now wrapping admin mutations; additional domain validation and donation/payout workflows are still pending.
+- **Persistence**: User, session, and audit collections back TikTok OAuth while challenges remain seeded; donation, payout, submission, and TikTok media stores must be modeled next.
+- **Security**: Fastify boots with Helmet, CORS allowlists, and Redis-backed rate limits, yet secret rotation guidance, webhook signature verification, and anomaly detection still need to be defined.
 
 ### Worker & Background Jobs Snapshot
 - BullMQ worker registers a `leaderboard` queue that returns static demo data validated by Zod.
@@ -76,7 +76,7 @@
 
 ### Shared Types & Contracts Snapshot
 - `@trendpot/types` contains Zod schemas for challenges with lifecycle status enums, optimistic locking inputs, and a minimal leaderboard payload.
-- Missing domain types: users/auth sessions, submissions, donations, payouts, TikTok assets, webhook envelopes, and audit logs.
+- Missing domain types: submissions, donations, payouts, TikTok assets, webhook envelopes, and richer analytics payloads.
 - Persisted query governance and schema diff tooling are planned but not yet configured in CI.
 
 ### UI/UX & Design System Snapshot
@@ -85,9 +85,9 @@
 - Accessibility considerations (focus states, contrast ratios, keyboard navigation) are undocumented.
 
 ### Security & Compliance Snapshot
-- Lack of authentication/authorization on admin routes means `createChallenge` is publicly callable.
-- No rate limiting, IP allowlisting, or anomaly detection for API or worker.
-- Webhook handlers, encryption-at-rest guidance, and key management for TikTok/M-Pesa tokens are not in place.
+- TikTok OAuth + session cookies now gate admin routes, with role checks preventing unauthorized challenge mutations.
+- Redis-backed rate limiting and CORS allowlists ship with the API, but anomaly detection and abuse monitoring still need coverage.
+- Webhook signature verification, encryption-at-rest guidance, and key management for TikTok/M-Pesa tokens remain to be implemented.
 
 ### Observability & Testing Snapshot
 - No unit, integration, or end-to-end test suites are configured across `web`, `api`, or `worker`.
@@ -105,7 +105,7 @@
 - This tracker now consolidates state, milestones, and future checkpoints for quick glance status across teams.
 
 ### Key Gaps & Risks (Quick Reference)
-- **Security**: Public admin mutation access, permissive CORS, missing rate limiting, no audit logs.
+- **Security**: Webhook signing, credential rotation guidance, and anomaly detection still missing ahead of donations/payouts.
 - **Domain Coverage**: Only challenges modeled; donations, TikTok videos, user accounts, payouts, and compliance artifacts missing.
 - **UX Depth**: Read-only experience without donation or creator flows; design system incomplete for responsive delivery.
 - **Background Processing**: Worker disconnected from real data sources; no scheduling or notification backbone.
@@ -138,7 +138,7 @@
 - ☑ **Restrict CORS to approved origins and introduce Helmet + security headers across API.** _(Owner: Platform)_
   - Notes: 2025-10-05 – AI – Registered Fastify Helmet, enforced env-driven CORS allowlists with 403 rejections for unknown origins, echoed request IDs, and added tests covering headers + blocked origins.
 - ☑ **Produce responsive UX for login/signup/account management (desktop & mobile).** _(Owner: Frontend)_
-  - Notes: 2025-10-05 – AI – Delivered the initial App Router auth flows and responsive account dashboard. 2025-10-10 – AI – Shipped TikTok-first login CTAs, guest browsing, and an inline account profile form that responds to `PROFILE_INCOMPLETE` errors while keeping mobile session drawers and CTA footers intact.
+  - Notes: 2025-10-05 – AI – Delivered the initial App Router auth flows and responsive account dashboard. 2025-10-10 – AI – Shipped TikTok-first login CTAs, guest browsing, and an inline account profile form that responds to `PROFILE_INCOMPLETE` errors while keeping mobile session drawers and CTA footers intact. 2025-10-11 – AI – Finalized TikTok-only enforcement by retiring email verify inputs, wiring verify page CTA redirects, and refreshing tracker status.
 
 
 ## 4. TikTok Content Ingestion & Presentation
