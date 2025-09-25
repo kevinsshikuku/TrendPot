@@ -7,13 +7,44 @@ type ChallengeSummary {
   currency: String!
 }
 
+type Challenge {
+  id: String!
+  title: String!
+  tagline: String!
+  raised: Int!
+  goal: Int!
+  currency: String!
+  description: String!
+  status: String!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
 type Health {
   status: String!
   service: String!
   uptime: Float!
 }
 
+input CreateChallengeInput {
+  id: String!
+  title: String!
+  tagline: String!
+  description: String!
+  goal: Int!
+  currency: String
+  status: String
+}
+
 type Query {
   featuredChallenges(status: String, limit: Int): [ChallengeSummary!]!
+  challenges(status: String, limit: Int): [ChallengeSummary!]!
+  challenge(id: String!): Challenge
   health: Health!
 }
+
+type Mutation {
+  createChallenge(input: CreateChallengeInput!): Challenge!
+}
+
+scalar DateTime

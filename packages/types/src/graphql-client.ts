@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { challengeSummaryListSchema } from "./challenges";
+import { challengeSchema, challengeSummaryListSchema } from "./challenges";
+import type { Challenge } from "./challenges";
 
 export interface TrendPotGraphQLClientOptions {
   baseUrl: string;
@@ -10,6 +11,16 @@ export interface TrendPotGraphQLClientOptions {
 export interface ListChallengesParams {
   status?: string;
   limit?: number;
+}
+
+export interface CreateChallengeInput {
+  id: string;
+  title: string;
+  tagline: string;
+  description: string;
+  goal: number;
+  currency?: string;
+  status?: string;
 }
 
 const graphQLResponseSchema = z.object({
@@ -37,6 +48,65 @@ const FEATURED_CHALLENGES_QUERY = /* GraphQL */ `
       raised
       goal
       currency
+    }
+  }
+`;
+
+const challengesDataSchema = z.object({
+  challenges: challengeSummaryListSchema
+});
+
+const CHALLENGES_QUERY = /* GraphQL */ `
+  query Challenges($status: String, $limit: Int) {
+    challenges(status: $status, limit: $limit) {
+      id
+      title
+      tagline
+      raised
+      goal
+      currency
+    }
+  }
+`;
+
+const challengeDataSchema = z.object({
+  challenge: challengeSchema.nullable()
+});
+
+const CHALLENGE_QUERY = /* GraphQL */ `
+  query Challenge($id: String!) {
+    challenge(id: $id) {
+      id
+      title
+      tagline
+      raised
+      goal
+      currency
+      description
+      status
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+const createChallengeDataSchema = z.object({
+  createChallenge: challengeSchema
+});
+
+const CREATE_CHALLENGE_MUTATION = /* GraphQL */ `
+  mutation CreateChallenge($input: CreateChallengeInput!) {
+    createChallenge(input: $input) {
+      id
+      title
+      tagline
+      raised
+      goal
+      currency
+      description
+      status
+      createdAt
+      updatedAt
     }
   }
 `;
@@ -70,7 +140,7 @@ export class TrendPotGraphQLClient {
   }
 
   async getFeaturedChallenges(params: ListChallengesParams = {}) {
-    const variables = this.prepareFeaturedChallengesVariables(params);
+    const variables = this.prepareListVariables(params);
 
     return this.executeGraphQL({
       query: FEATURED_CHALLENGES_QUERY,
@@ -79,7 +149,45 @@ export class TrendPotGraphQLClient {
     });
   }
 
-  private prepareFeaturedChallengesVariables(params: ListChallengesParams) {
+  async listChallenges(params: ListChallengesParams = {}) {
+    const variables = this.prepareListVariables(params);
+
+    return this.executeGraphQL({
+      query: CHALLENGES_QUERY,
+      variables,
+      parser: (payload) => challengesDataSchema.parse(payload).challenges
+    });
+  }
+
+  async getChallenge(id: string): Promise<Challenge | null> {
+    const normalized = id.trim();
+
+    if (!normalized) {
+      throw new Error("A challenge id is required.");
+    }
+
+    return this.executeGraphQL({
+      query: CHALLENGE_QUERY,
+      variables: { id: normalized },
+      parser: (payload) => {
+        const challenge = challengeDataSchema.parse(payload).challenge;
+        if (!challenge) {
+          return null;
+        }
+        return challenge;
+      }
+    });
+  }
+
+  async createChallenge(input: CreateChallengeInput) {
+    return this.executeGraphQL({
+      query: CREATE_CHALLENGE_MUTATION,
+      variables: { input },
+      parser: (payload) => createChallengeDataSchema.parse(payload).createChallenge
+    });
+  }
+
+  private prepareListVariables(params: ListChallengesParams) {
     const variables: Record<string, unknown> = {};
 
     if (params.status && params.status.length > 0) {
@@ -141,3 +249,4 @@ export class TrendPotGraphQLClient {
 }
 
 export { FEATURED_CHALLENGES_QUERY };
+export { CHALLENGES_QUERY, CHALLENGE_QUERY, CREATE_CHALLENGE_MUTATION };
