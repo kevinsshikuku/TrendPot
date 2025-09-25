@@ -48,10 +48,6 @@ This document is the single source of truth for how TrendPot is wired end-to-end
   1. Hydrates cached query and keeps it fresh for 30 seconds.
   2. Renders **Campaign Pulse** summary card with static KPI placeholders (active challenges, submissions, donations).
   3. Renders **Featured challenges** section containing:
-     * CTA card “Launch your first campaign” with a `Create challenge` button (no handler yet).
-     * Dynamic list of challenge cards or skeleton/error states depending on fetch status.
-     * “View all” link to `/challenges` for the full catalog (route not yet implemented).
-     * Per-card “View insights” link to `/c/{challengeId}` for detail view (route stub not yet implemented).
   4. Error handling surfaces GraphQL issues with a retry button powered by React Query `refetch`.
 * Interaction states to preserve:
   * Keep skeleton placeholders equal to `FEATURED_CHALLENGE_LIMIT` to avoid layout shift.
@@ -62,9 +58,6 @@ These routes are referenced in the UX but missing page files. Treat them as high
 
 | Route | Purpose | Notes |
 | --- | --- | --- |
-| `/challenges` | Full catalog with filters, sorting, and pagination. | Needs server data plumbing for list browsing; align with `featuredChallenges` schema or plan richer model. |
-| `/c/[id]` | Challenge insight detail view with storyline, analytics, and donation entry points. | Should prefetch challenge detail query (to be defined) and render leaderboard snapshots. |
-| `/donate/[submissionId]` | Not linked yet, but planned for direct donation flow per sprint plan. | Blocked on M-Pesa integration & secure form handling. |
 | `/me` | Account dashboard for admins/creators. | Requires auth wiring (Clerk) and role-based content. |
 
 ---
@@ -75,7 +68,6 @@ These routes are referenced in the UX but missing page files. Treat them as high
 * Client wrapper: `TrendPotGraphQLClient` in `packages/types/src/graphql-client.ts`.
   * Configures base URL via `NEXT_PUBLIC_API_URL` → `API_BASE_URL` → fallback `http://localhost:4000` (`apps/web/src/lib/api-client.ts`).
   * Enforces JSON content-type, surfaces GraphQL errors, and validates responses with Zod before returning to callers.
-* Query options: `featuredChallengesQueryOptions()` centralises query key, fetcher, and stale time for reuse across components.
 
 ### Featured challenge pipeline
 1. **Frontend query (React Query)**
@@ -87,8 +79,7 @@ These routes are referenced in the UX but missing page files. Treat them as high
 3. **API resolver**
    * `ChallengeResolver` in `apps/api/src/challenge.resolver.ts` maps arguments to `ListChallengesParams` and delegates to `AppService`.
 4. **Service layer**
-   * `AppService.getFeaturedChallenges()` currently slices an in-memory `demoChallenges` array based on a sanitised limit.
-   * Output type uses `ChallengeSummary` schema from `@trendpot/types` ensuring consistent shape across stack.
+
 
 ### Operational endpoints
 * `health` query (`apps/api/src/health.resolver.ts`) returns `{ status, service, uptime }`; useful for uptime monitors and dashboards.
@@ -98,33 +89,18 @@ These routes are referenced in the UX but missing page files. Treat them as high
 * `apps/worker/src/index.ts` boots a BullMQ worker bound to Redis (`REDIS_URL`).
 * Processes `leaderboard` jobs, constructing payload validated by `challengeLeaderboardSchema` (see `@trendpot/types/src/leaderboard.ts`).
 * Wraps job handler in `withRetries` helper from `@trendpot/utils` for resilient execution and logs success/failure events.
-* Downstream consumers (e.g., `/c/[id]` insights) will eventually subscribe to this data; ensure contract remains stable as UI adds leaderboard sections.
+
 
 ---
 
 ## Admin & operations experience
 
 * **Current state**
-  * UI only teases admin abilities via the “Create challenge” CTA with no click handler.
-  * Featured content is hard-coded in the API service, requiring code edits for updates.
-  * No authentication, role management, or admin dashboards exist yet.
-* **Planned direction**
-  * `/me` dashboard for authenticated creators/admins to manage campaigns.
-  * Challenge creation/editing flows that invoke future GraphQL mutations (e.g., `createChallenge`, `updateChallenge`).
-  * Integration with BullMQ leaderboards and M-Pesa donation telemetry for operations staff.
 
 ---
 
 ## Key gaps to address
 
-1. **Implement catalog & detail pages**
-   * Build `apps/web/src/app/challenges/page.tsx` to fulfil the “View all” navigation.
-   * Implement `apps/web/src/app/c/[id]/page.tsx` (or nested segments) so “View insights” links resolve.
-2. **Wire the “Create challenge” CTA to a real admin workflow**
-   * Introduce a modal or route that triggers authenticated creation flow once mutations exist.
-3. **Replace demo data with persistent storage**
-   * Back API resolver with MongoDB collections; maintain `ChallengeSummary` projection.
-   * Ship GraphQL mutations + admin UI to curate content without code changes.
 
 Keep these items visible in sprint planning until shipped; update this section with owner + status tags as work progresses.
 

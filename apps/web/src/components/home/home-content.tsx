@@ -5,24 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Button } from "@trendpot/ui";
 import type { ChallengeSummary } from "@trendpot/types";
 import { FEATURED_CHALLENGE_LIMIT, featuredChallengesQueryOptions } from "../../lib/challenge-queries";
-
-const currencyFormatter = new Intl.NumberFormat("en-KE", {
-  style: "currency",
-  currency: "KES",
-  maximumFractionDigits: 0
-});
-
-const formatAmount = (amount: number, currency: string) => {
-  try {
-    return new Intl.NumberFormat("en-KE", {
-      style: "currency",
-      currency,
-      maximumFractionDigits: 0
-    }).format(amount);
-  } catch (error) {
-    return currencyFormatter.format(amount);
-  }
-};
+import { calculateCompletionPercentage, formatCurrencyFromCents } from "../../lib/money";
 
 const challengeSkeletons = Array.from({ length: FEATURED_CHALLENGE_LIMIT }, (_, index) => index);
 
@@ -71,9 +54,12 @@ export function HomeContent() {
                 Kick off a creator challenge with automated storytelling prompts, metrics, and donation tooling.
               </p>
             </header>
-            <Button className="mt-6 w-fit" variant="primary">
+            <Link
+              className="mt-6 inline-flex w-fit items-center justify-center rounded-full bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-emerald-400"
+              href="/admin/challenges/new"
+            >
               Create challenge
-            </Button>
+            </Link>
           </article>
           {isPending &&
             challengeSkeletons.map((item) => (
@@ -104,9 +90,9 @@ export function HomeContent() {
 }
 
 function ChallengeCard({ challenge }: { challenge: ChallengeSummary }) {
-  const completion = Math.min(100, Math.round((challenge.raised / challenge.goal) * 100));
-  const raised = formatAmount(challenge.raised, challenge.currency);
-  const goal = formatAmount(challenge.goal, challenge.currency);
+  const completion = calculateCompletionPercentage(challenge.raised, challenge.goal);
+  const raised = formatCurrencyFromCents(challenge.raised, challenge.currency);
+  const goal = formatCurrencyFromCents(challenge.goal, challenge.currency);
 
   return (
     <article className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6">
