@@ -1,10 +1,4 @@
-import {
-  createCipheriv,
-  createHash,
-  createHmac,
-  randomBytes,
-  timingSafeEqual
-} from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { URLSearchParams } from "node:url";
 import { Injectable, UnauthorizedException, BadRequestException } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
@@ -20,6 +14,7 @@ import type {
   UserPermission,
   UserRole
 } from "@trendpot/types";
+import type { TikTokEncryptedSecret } from "@trendpot/utils";
 import { rolePermissions } from "@trendpot/types";
 import type { AuditLogDocument } from "./schemas/audit-log.schema";
 import { AuditLogEntity } from "./schemas/audit-log.schema";
@@ -27,6 +22,10 @@ import type { SessionDocument } from "./schemas/session.schema";
 import { SessionEntity } from "./schemas/session.schema";
 import type { UserDocument } from "./schemas/user.schema";
 import { UserEntity } from "./schemas/user.schema";
+import { TikTokAccountEntity } from "../models/tiktok-account.schema";
+import type { TikTokAccountDocument } from "../models/tiktok-account.schema";
+import { TikTokTokenService } from "../security/tiktok-token.service";
+import { TikTokIngestionQueue } from "../tiktok/tiktok-ingestion.queue";
 import { RateLimitService } from "../auth/rate-limit.service";
 import { AuthAuditService } from "../auth/auth-audit.service";
 import { RedisService } from "../redis/redis.service";
@@ -116,12 +115,6 @@ type TikTokProfile = {
   avatarUrl?: string;
 };
 
-interface EncryptedSecret {
-  ciphertext: string;
-  iv: string;
-  authTag: string;
-}
-
 const DEFAULT_TIKTOK_SCOPES = ["user.info.basic"];
 
 @Injectable()
@@ -129,30 +122,18 @@ export class PlatformAuthService {
   private readonly sessionTokenSecret =
     process.env.AUTH_SESSION_TOKEN_SECRET ?? "trendpot-dev-session-token";
   private readonly refreshHashSecret = process.env.AUTH_REFRESH_HASH_SECRET ?? "trendpot-dev-refresh";
-  private readonly tiktokEncryptionKey: Buffer;
-  private readonly tiktokKeyId = process.env.TIKTOK_TOKEN_ENC_KEY_ID ?? "local-dev";
-
   constructor(
     @InjectModel(UserEntity.name) private readonly userModel: Model<UserDocument>,
     @InjectModel(SessionEntity.name) private readonly sessionModel: Model<SessionDocument>,
     @InjectModel(AuditLogEntity.name) private readonly auditLogModel: Model<AuditLogDocument>,
+    @InjectModel(TikTokAccountEntity.name)
+    private readonly tiktokAccountModel: Model<TikTokAccountDocument>,
     private readonly rateLimitService: RateLimitService,
     private readonly auditService: AuthAuditService,
-    private readonly redisService: RedisService
-  ) {
-    const providedKey = process.env.TIKTOK_TOKEN_ENC_KEY;
-    if (providedKey) {
-      const buffer = Buffer.from(providedKey, "base64");
-      if (buffer.length !== 32) {
-        throw new Error("TIKTOK_TOKEN_ENC_KEY must be a 32-byte base64 string");
-      }
-      this.tiktokEncryptionKey = buffer;
-    } else {
-      this.tiktokEncryptionKey = createHash("sha256")
-        .update(process.env.AUTH_SESSION_TOKEN_SECRET ?? "trendpot-dev-session-token")
-        .digest();
-    }
-  }
+    private readonly redisService: RedisService,
+    private readonly tiktokTokenService: TikTokTokenService,
+    private readonly tiktokIngestionQueue: TikTokIngestionQueue
+  ) {}
 
   async createTikTokLoginIntent(params: TikTokLoginIntentParams): Promise<TikTokLoginIntentResult> {
     const { logger, requestId, ipAddress, scopes, returnPath, redirectUri, deviceLabel } = params;
@@ -436,19 +417,6 @@ export class PlatformAuthService {
     }
   }
 
-  private encryptSecret(plaintext: string): EncryptedSecret {
-    const iv = randomBytes(12);
-    const cipher = createCipheriv("aes-256-gcm", this.tiktokEncryptionKey, iv);
-    const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-    const authTag = cipher.getAuthTag();
-
-    return {
-      ciphertext: ciphertext.toString("base64"),
-      iv: iv.toString("base64"),
-      authTag: authTag.toString("base64")
-    };
-  }
-
   private async upsertTikTokUser(params: {
     profile: TikTokProfile;
     tokenExchange: TikTokTokenExchange;
@@ -460,8 +428,10 @@ export class PlatformAuthService {
     const { profile, tokenExchange, logger, requestId, ipAddress, userAgent } = params;
 
     const now = new Date();
-    const encryptedAccess = this.encryptSecret(tokenExchange.accessToken);
-    const encryptedRefresh = this.encryptSecret(tokenExchange.refreshToken);
+    const accessTokenExpiresAt = new Date(Date.now() + tokenExchange.expiresIn * 1000);
+    const refreshTokenExpiresAt = new Date(Date.now() + tokenExchange.refreshExpiresIn * 1000);
+    const encryptedAccess = this.tiktokTokenService.encrypt(tokenExchange.accessToken);
+    const encryptedRefresh = this.tiktokTokenService.encrypt(tokenExchange.refreshToken);
 
     const update = {
       displayName: profile.displayName ?? "TikTok User",
@@ -478,15 +448,15 @@ export class PlatformAuthService {
         lastLoginAt: now
       },
       tiktokAuth: {
-        keyId: this.tiktokKeyId,
+        keyId: this.tiktokTokenService.keyId,
         accessToken: encryptedAccess.ciphertext,
         accessTokenIv: encryptedAccess.iv,
         accessTokenTag: encryptedAccess.authTag,
         refreshToken: encryptedRefresh.ciphertext,
         refreshTokenIv: encryptedRefresh.iv,
         refreshTokenTag: encryptedRefresh.authTag,
-        accessTokenExpiresAt: new Date(Date.now() + tokenExchange.expiresIn * 1000),
-        refreshTokenExpiresAt: new Date(Date.now() + tokenExchange.refreshExpiresIn * 1000),
+        accessTokenExpiresAt,
+        refreshTokenExpiresAt,
         scope: tokenExchange.scope
       }
     };
@@ -516,6 +486,17 @@ export class PlatformAuthService {
       if (!user) {
         throw new UnauthorizedException("Failed to load account after TikTok login");
       }
+      await this.upsertTikTokAccount({
+        user,
+        profile,
+        tokenExchange,
+        encryptedAccess,
+        encryptedRefresh,
+        accessTokenExpiresAt,
+        refreshTokenExpiresAt,
+        logger,
+        requestId
+      });
       return user;
     }
 
@@ -531,6 +512,18 @@ export class PlatformAuthService {
       metadata: update.metadata,
       audit: { lastLoginAt: now },
       tiktokAuth: update.tiktokAuth
+    });
+
+    await this.upsertTikTokAccount({
+      user,
+      profile,
+      tokenExchange,
+      encryptedAccess,
+      encryptedRefresh,
+      accessTokenExpiresAt,
+      refreshTokenExpiresAt,
+      logger,
+      requestId
     });
 
     await this.appendAuditLog({
@@ -555,6 +548,117 @@ export class PlatformAuthService {
     );
 
     return user;
+  }
+
+  private async upsertTikTokAccount(params: {
+    user: UserDocument;
+    profile: TikTokProfile;
+    tokenExchange: TikTokTokenExchange;
+    encryptedAccess: TikTokEncryptedSecret;
+    encryptedRefresh: TikTokEncryptedSecret;
+    accessTokenExpiresAt: Date;
+    refreshTokenExpiresAt: Date;
+    logger: Logger;
+    requestId: string;
+  }): Promise<TikTokAccountDocument | null> {
+    const {
+      user,
+      profile,
+      tokenExchange,
+      encryptedAccess,
+      encryptedRefresh,
+      accessTokenExpiresAt,
+      refreshTokenExpiresAt,
+      logger,
+      requestId
+    } = params;
+
+    const username = profile.username ?? user.tiktokUsername ?? tokenExchange.openId;
+
+    const now = new Date();
+    const update = {
+      username,
+      displayName: profile.displayName ?? user.displayName ?? null,
+      avatarUrl: profile.avatarUrl ?? user.avatarUrl ?? null,
+      scopes: tokenExchange.scope,
+      accessToken: {
+        keyId: this.tiktokTokenService.keyId,
+        ciphertext: encryptedAccess.ciphertext,
+        iv: encryptedAccess.iv,
+        authTag: encryptedAccess.authTag
+      },
+      refreshToken: {
+        keyId: this.tiktokTokenService.keyId,
+        ciphertext: encryptedRefresh.ciphertext,
+        iv: encryptedRefresh.iv,
+        authTag: encryptedRefresh.authTag
+      },
+      accessTokenExpiresAt,
+      refreshTokenExpiresAt,
+      syncMetadata: {
+        lastProfileRefreshAt: now
+      }
+    };
+
+    const account = await this.tiktokAccountModel
+      .findOneAndUpdate(
+        { openId: tokenExchange.openId },
+        {
+          $set: {
+            username: update.username,
+            displayName: update.displayName,
+            avatarUrl: update.avatarUrl,
+            scopes: update.scopes,
+            accessToken: update.accessToken,
+            refreshToken: update.refreshToken,
+            accessTokenExpiresAt: update.accessTokenExpiresAt,
+            refreshTokenExpiresAt: update.refreshTokenExpiresAt,
+            "syncMetadata.lastProfileRefreshAt": update.syncMetadata.lastProfileRefreshAt
+          },
+          $setOnInsert: {
+            userId: user._id,
+            syncMetadata: update.syncMetadata
+          }
+        },
+        { new: true, upsert: true, setDefaultsOnInsert: true }
+      )
+      .exec();
+
+    logger.info(
+      {
+        event: "auth.tiktok.account_upserted",
+        requestId,
+        userId: user.id ?? String(user._id),
+        openId: tokenExchange.openId
+      },
+      "TikTok account tokens updated"
+    );
+
+    const resolvedUserId = typeof user.id === "string" && user.id.length > 0 ? user.id : null;
+
+    if (resolvedUserId) {
+      try {
+        await this.tiktokIngestionQueue.enqueueInitialSync({
+          accountId: account.id,
+          userId: resolvedUserId,
+          trigger: "account_linked",
+          requestId,
+          queuedAt: new Date().toISOString()
+        });
+      } catch (error) {
+        logger.error(
+          { event: "tiktok.ingestion.enqueue_failed", error: (error as Error).message, requestId, accountId: account.id },
+          "Failed to enqueue TikTok ingestion job"
+        );
+      }
+    } else {
+      logger.warn(
+        { event: "tiktok.ingestion.missing_user_id", requestId, accountId: account.id },
+        "Skipping TikTok ingestion enqueue because user id is missing"
+      );
+    }
+
+    return account;
   }
 
   private signSessionToken(payload: SessionTokenPayload) {

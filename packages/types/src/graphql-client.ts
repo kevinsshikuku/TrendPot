@@ -176,6 +176,52 @@ const CHALLENGE_QUERY = /* GraphQL */ `
       version
       description
       createdAt
+      submissions {
+        edges {
+          cursor
+          node {
+            id
+            challengeId
+            creatorUserId
+            videoId
+            state
+            rejectionReason
+            createdAt
+            updatedAt
+            video {
+              id
+              tiktokVideoId
+              ownerAccountId
+              shareUrl
+              caption
+              postedAt
+              embed {
+                provider
+                html
+                scriptUrl
+                width
+                height
+                thumbnailUrl
+                authorName
+                authorUrl
+              }
+              metrics {
+                likeCount
+                commentCount
+                shareCount
+                viewCount
+              }
+              lastRefreshedAt
+              createdAt
+              updatedAt
+            }
+          }
+        }
+        pageInfo {
+          endCursor
+          hasNextPage
+        }
+      }
     }
   }
 `;

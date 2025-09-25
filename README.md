@@ -1067,6 +1067,14 @@ Mongoose schemas colocate with modules; each module exports a documented public 
 Feature flags via env/DB; no hard‑coded behavior.
 
 
+## TikTok Ingestion Security & QA Checklist
+- **Key management:** Encrypted TikTok OAuth tokens must use the `trendpot/tiktok-display-oauth` KMS key. Rotate client and refresh secrets quarterly and verify the key ID stored with each credential matches the active cipher before deployment.
+- **Sanitization:** Run `NODE_PATH=./test-shims node --loader ./test-shims/ts-loader.mjs --test packages/types/src/tiktok.sanitization.test.ts` to ensure the embed sanitizer rejects malicious HTML payloads prior to rollout.
+- **Worker health:** Execute the integration tests in `apps/worker/src/tiktok/tiktok-jobs.integration.test.ts` to validate metrics refresh flows, Redis publications, and token refresh logic in isolation.
+- **Frontend rendering:** Render `apps/web/src/components/challenges/challenge-detail.integration.test.tsx` when validating responsive embeds so regressions in the hero/full-bleed layout are caught early.
+- **Runbook:** See `docs/runbooks/tiktok-ingestion.md` for incident response, manual refresh, and provisioning guidance.
+
+
 
 
 

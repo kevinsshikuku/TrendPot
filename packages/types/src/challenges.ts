@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { submissionConnectionSchema } from "./tiktok";
 
 export const challengeStatusSchema = z.enum(["draft", "live", "archived"]);
 
@@ -18,7 +19,8 @@ export const challengeSummaryListSchema = z.array(challengeSummarySchema);
 
 export const challengeSchema = challengeSummarySchema.extend({
   description: z.string(),
-  createdAt: z.string()
+  createdAt: z.string(),
+  submissions: submissionConnectionSchema.nullable().optional()
 });
 
 export const challengeStatusBreakdownSchema = z.object({

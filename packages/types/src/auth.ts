@@ -137,7 +137,9 @@ export const auditLogActionSchema = z.enum([
   "auth.session.revoke",
   "auth.profile.update",
   "security.settings.update",
-  "security.rate_limit.update"
+  "security.rate_limit.update",
+  "tiktok.video.list",
+  "tiktok.submission.create"
 ]);
 export type AuditLogAction = z.infer<typeof auditLogActionSchema>;
 
