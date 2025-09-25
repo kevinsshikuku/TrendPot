@@ -6,6 +6,8 @@ import {
 } from "./challenges";
 import type { ChallengeList } from "./challenges";
 import type { Challenge } from "./challenges";
+import { viewerSchema } from "./auth";
+import type { Viewer } from "./auth";
 
 export interface TrendPotGraphQLClientOptions {
   baseUrl: string;
@@ -198,6 +200,36 @@ const CHALLENGE_ADMIN_LIST_QUERY = /* GraphQL */ `
   }
 `;
 
+const viewerDataSchema = z.object({
+  viewer: viewerSchema
+});
+
+const VIEWER_QUERY = /* GraphQL */ `
+  query Viewer {
+    viewer {
+      user {
+        id
+        email
+        phone
+        displayName
+        roles
+        permissions
+        status
+        createdAt
+        updatedAt
+      }
+      session {
+        id
+        issuedAt
+        expiresAt
+        ipAddress
+        userAgent
+        status
+      }
+    }
+  }
+`;
+
 const updateChallengeDataSchema = z.object({
   updateChallenge: challengeSchema
 });
@@ -344,6 +376,13 @@ export class TrendPotGraphQLClient {
     });
   }
 
+  async getViewer(): Promise<Viewer> {
+    return this.executeGraphQL({
+      query: VIEWER_QUERY,
+      parser: (payload) => viewerDataSchema.parse(payload).viewer
+    });
+  }
+
   private prepareListVariables(params: ListChallengesParams) {
     const variables: Record<string, unknown> = {};
 
@@ -435,7 +474,7 @@ export class TrendPotGraphQLClient {
   }
 }
 
-export { FEATURED_CHALLENGES_QUERY };
+export { FEATURED_CHALLENGES_QUERY, VIEWER_QUERY };
 export {
   CHALLENGES_QUERY,
   CHALLENGE_QUERY,
