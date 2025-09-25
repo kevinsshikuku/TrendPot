@@ -10,16 +10,16 @@
 - **Authentication Principle**: All identity, session, and authorization capabilities must be implemented in-house. Do not integrate paid third-party auth providers (e.g., Clerk).
 - **Design Principle**: Every feature must account for desktop and mobile breakpoints; capture responsive mockups/wireframes before implementation and store references in design documentation.
 
-## Current State Overview (Last Updated: 2024-05-30)
+## Current State Overview (Last Updated: 2025-09-25)
 
 ### Frontend (Next.js PWA)
 - **Status**: ▣
-- **Snapshot**: Static hero layout with seeded challenge listings; lacks navigation, auth gating, and install prompts.
-- **Implementation Notes**: Responsive component library stops at Tailwind primitives and must expand to cover desktop/mobile parity.
+- **Snapshot**: Admin challenge management flows support create/edit/archive with responsive forms, validation feedback, and analytics-driven listings; public surfaces still lack navigation, auth gating, and install prompts.
+- **Implementation Notes**: Responsive component library now covers admin dashboards but must extend to public donation and creator experiences for full desktop/mobile parity.
 
 ### Backend & GraphQL API (NestJS + Mercurius)
 - **Status**: ▣
-- **Snapshot**: Challenge CRUD limited to list/read/create operations.
+- **Snapshot**: GraphQL schema exposes full challenge lifecycle mutations (create/update/archive) with optimistic locking and status transition enforcement alongside listing analytics.
 - **Implementation Notes**: Authentication, rate limiting, and additional domain models (donations, submissions, payouts) remain unimplemented.
 
 ### Worker (BullMQ)
@@ -29,7 +29,7 @@
 
 ### Shared Types & Contracts
 - **Status**: ▣
-- **Snapshot**: Zod schemas cover challenges and a minimal leaderboard payload.
+- **Snapshot**: Zod schemas cover challenges, lifecycle statuses, optimistic locking payloads, and a minimal leaderboard payload.
 - **Implementation Notes**: User, donation, submission, auth, and webhook envelopes are missing from shared contracts.
 
 ### UI/UX & Design System
@@ -58,15 +58,15 @@
 - **Implementation Notes**: This tracker now consolidates state and milestones for a single glance across teams.
 
 ### Frontend Snapshot
-- **Routing & Data**: `/`, `/challenges`, and `/c/[id]` pages prefetch challenge data server-side and hydrate React Query caches, but they present placeholder KPIs and static progress visuals. Navigation, authentication-aware layouts, and donation/submission flows are absent.
-- **State Management**: React Query client is initialized globally; error/loading states are basic and not mobile-optimized.
-- **Responsiveness**: Base Tailwind styling delivers simple stacked sections; no dedicated mobile navigation, sticky CTAs, or adaptive typography tokens are defined yet. Desktop/mobile parity must be validated before future milestones are marked complete.
+- **Routing & Data**: Admin routes deliver create/edit forms that hydrate React Query caches, process GraphQL validation errors, and surface challenge analytics with server-driven pagination and filters. Public routes (`/`, `/challenges`, `/c/[id]`) still present placeholder KPIs and lack authenticated flows for donations or submissions.
+- **State Management**: React Query client is initialized globally; admin workflows incorporate optimistic updates and cache invalidation, while public error/loading states remain basic and not mobile-optimized.
+- **Responsiveness**: Admin dashboards render responsive tables/cards with mobile-first layouts; broader site still needs dedicated mobile navigation, sticky CTAs, and adaptive typography tokens for parity.
 - **Installability**: No web app manifest, service worker, or offline caching strategy is implemented despite PWA goals.
 
 ### Backend & API Snapshot
-- **Schema Coverage**: GraphQL exposes `featuredChallenges`, `challenges`, `challenge`, `createChallenge`, and `health` only. Update/archive mutations, donations, submissions, TikTok content, and auth endpoints are missing.
-- **Business Logic**: `AppService` normalizes slugs and amount inputs for challenges but performs no authorization, rate limiting, or audit logging. Validation beyond Nest defaults is minimal.
-- **Persistence**: Only the `ChallengeEntity` Mongoose model exists. Collections for users, donations, payouts, submissions, OAuth tokens, and audit trails must be modeled to meet roadmap requirements.
+- **Schema Coverage**: GraphQL exposes challenge queries plus create/update/archive mutations with lifecycle status enums, optimistic locking inputs, and analytics fields; donations, submissions, TikTok content, and auth endpoints are still missing.
+- **Business Logic**: Challenge service enforces version checks and allowable status transitions before persistence but continues to lack authorization, rate limiting, and audit logging. Validation beyond Nest defaults is minimal.
+- **Persistence**: `ChallengeEntity` includes lifecycle metadata; collections for users, donations, payouts, submissions, OAuth tokens, and audit trails must be modeled to meet roadmap requirements.
 - **Security**: API accepts cross-origin requests (`origin: true`) with credentials; Helmet and throttlers are not configured. Secrets are expected via environment variables without rotation playbooks.
 
 ### Worker & Background Jobs Snapshot
@@ -75,7 +75,7 @@
 - Queue-based notifications, TikTok refresh jobs, and donation reconciliation are not implemented.
 
 ### Shared Types & Contracts Snapshot
-- `@trendpot/types` contains Zod schemas for challenges and a minimal leaderboard payload.
+- `@trendpot/types` contains Zod schemas for challenges with lifecycle status enums, optimistic locking inputs, and a minimal leaderboard payload.
 - Missing domain types: users/auth sessions, submissions, donations, payouts, TikTok assets, webhook envelopes, and audit logs.
 - Persisted query governance and schema diff tooling are planned but not yet configured in CI.
 
@@ -123,12 +123,12 @@
   - Notes: 2025-10-04 – AI – Documented Figma references and responsive behaviors for core pages in `docs/design/responsive-baselines.md`.
 
 ## 2. Challenge Management Maturity
-- ☐ **Extend GraphQL schema for challenge lifecycle (create/update/archive, status transitions, optimistic locking).** _(Owner: Backend)_
-  - Notes:
-- ☐ **Enhance admin UI for create/edit with server-driven validation and responsive layouts.** _(Owner: Frontend)_
-  - Notes:
-- ☐ **Add pagination/filtering analytics to challenge listings with mobile-first tables/cards.** _(Owner: Frontend)_
-  - Notes:
+- ☑ **Extend GraphQL schema for challenge lifecycle (create/update/archive, status transitions, optimistic locking).** _(Owner: Backend)_
+  - Notes: 2025-09-25 – AI – Delivered lifecycle mutations with status enums, optimistic locking, and guarded transitions across service and schema layers.
+- ☑ **Enhance admin UI for create/edit with server-driven validation and responsive layouts.** _(Owner: Frontend)_
+  - Notes: 2025-09-25 – AI – Added dedicated admin forms that surface GraphQL validation errors, hydrate caches, and adjust layouts for desktop/mobile.
+- ☑ **Add pagination/filtering analytics to challenge listings with mobile-first tables/cards.** _(Owner: Frontend)_
+  - Notes: 2025-09-25 – AI – Implemented server-driven pagination with status/search filters, analytics panels, and responsive table/card views.
 
 ## 3. In-House Authentication & Access Control
 - ☐ **Build internal auth service (user store, passwordless/email OTP or similar) with secure session issuance.** _(Owner: Platform)_
