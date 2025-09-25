@@ -6,6 +6,12 @@ import {
 } from "./challenges";
 import type { ChallengeList } from "./challenges";
 import type { Challenge } from "./challenges";
+import {
+  emailOtpChallengeSchema,
+  viewerSchema,
+  viewerSessionSchema
+} from "./auth";
+import type { EmailOtpChallenge, Viewer, ViewerSession } from "./auth";
 
 export interface TrendPotGraphQLClientOptions {
   baseUrl: string;
@@ -53,6 +59,29 @@ export interface UpdateChallengeInput {
 export interface ArchiveChallengeInput {
   id: string;
   expectedVersion: number;
+}
+
+export interface GraphQLOperationOptions {
+  init?: RequestInit;
+  includeResponse?: boolean;
+}
+
+export interface GraphQLExecutionResult<TResult> {
+  data: TResult;
+  response: Response;
+}
+
+export interface RequestEmailOtpInput {
+  email: string;
+  displayName?: string;
+  deviceLabel?: string;
+}
+
+export interface VerifyEmailOtpInput {
+  email: string;
+  otpCode: string;
+  token: string;
+  deviceLabel?: string;
 }
 
 export class GraphQLRequestError extends Error {
@@ -198,6 +227,189 @@ const CHALLENGE_ADMIN_LIST_QUERY = /* GraphQL */ `
   }
 `;
 
+const viewerDataSchema = z.object({
+  viewer: viewerSchema
+});
+
+const VIEWER_QUERY = /* GraphQL */ `
+  query Viewer {
+    viewer {
+      user {
+        id
+        email
+        phone
+        displayName
+        roles
+        permissions
+        status
+        createdAt
+        updatedAt
+      }
+      session {
+        id
+        userId
+        rolesSnapshot
+        issuedAt
+        expiresAt
+        ipAddress
+        userAgent
+        status
+        deviceLabel
+        riskLevel
+        refreshTokenHash
+        metadata {
+          device
+          riskLevel
+        }
+      }
+    }
+  }
+`;
+
+const requestEmailOtpDataSchema = z.object({
+  requestEmailOtp: emailOtpChallengeSchema
+});
+
+const REQUEST_EMAIL_OTP_MUTATION = /* GraphQL */ `
+  mutation RequestEmailOtp($input: RequestEmailOtpInput!) {
+    requestEmailOtp(input: $input) {
+      token
+      expiresAt
+      deliveryHint
+    }
+  }
+`;
+
+const verifyEmailOtpDataSchema = z.object({
+  verifyEmailOtp: viewerSchema
+});
+
+const VERIFY_EMAIL_OTP_MUTATION = /* GraphQL */ `
+  mutation VerifyEmailOtp($input: VerifyEmailOtpInput!) {
+    verifyEmailOtp(input: $input) {
+      user {
+        id
+        email
+        phone
+        displayName
+        roles
+        permissions
+        status
+        createdAt
+        updatedAt
+      }
+      session {
+        id
+        userId
+        rolesSnapshot
+        issuedAt
+        expiresAt
+        ipAddress
+        userAgent
+        status
+        deviceLabel
+        riskLevel
+        refreshTokenHash
+        metadata {
+          device
+          riskLevel
+        }
+      }
+    }
+  }
+`;
+
+const viewerSessionsDataSchema = z.object({
+  viewerSessions: z.array(viewerSessionSchema)
+});
+
+const VIEWER_SESSIONS_QUERY = /* GraphQL */ `
+  query ViewerSessions {
+    viewerSessions {
+      id
+      userId
+      rolesSnapshot
+      issuedAt
+      expiresAt
+      ipAddress
+      userAgent
+      status
+      deviceLabel
+      riskLevel
+      refreshTokenHash
+      metadata {
+        device
+        riskLevel
+      }
+    }
+  }
+`;
+
+const logoutSessionDataSchema = z.object({
+  logoutSession: viewerSchema
+});
+
+const LOGOUT_SESSION_MUTATION = /* GraphQL */ `
+  mutation LogoutSession($sessionId: String!) {
+    logoutSession(sessionId: $sessionId) {
+      user {
+        id
+        email
+        phone
+        displayName
+        roles
+        permissions
+        status
+        createdAt
+        updatedAt
+      }
+      session {
+        id
+        userId
+        rolesSnapshot
+        issuedAt
+        expiresAt
+        ipAddress
+        userAgent
+        status
+        deviceLabel
+        riskLevel
+        refreshTokenHash
+        metadata {
+          device
+          riskLevel
+        }
+      }
+    }
+  }
+`;
+
+const revokeSessionDataSchema = z.object({
+  revokeSession: viewerSessionSchema
+});
+
+const REVOKE_SESSION_MUTATION = /* GraphQL */ `
+  mutation RevokeSession($sessionId: String!) {
+    revokeSession(sessionId: $sessionId) {
+      id
+      userId
+      rolesSnapshot
+      issuedAt
+      expiresAt
+      ipAddress
+      userAgent
+      status
+      deviceLabel
+      riskLevel
+      refreshTokenHash
+      metadata {
+        device
+        riskLevel
+      }
+    }
+  }
+`;
+
 const updateChallengeDataSchema = z.object({
   updateChallenge: challengeSchema
 });
@@ -242,17 +454,10 @@ const ARCHIVE_CHALLENGE_MUTATION = /* GraphQL */ `
   }
 `;
 
-type GraphQLExecutor = <TResult>(options: {
-  query: string;
-  variables?: Record<string, unknown>;
-  parser: (payload: unknown) => TResult;
-}) => Promise<TResult>;
-
 export class TrendPotGraphQLClient {
   private readonly baseUrl: string;
   private readonly fetchFn: typeof fetch;
   private readonly defaultHeaders: HeadersInit;
-  private readonly executeGraphQL: GraphQLExecutor;
 
   constructor(options: TrendPotGraphQLClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
@@ -266,38 +471,42 @@ export class TrendPotGraphQLClient {
       Accept: "application/json",
       "Content-Type": "application/json"
     };
-
-    this.executeGraphQL = this.createExecutor();
   }
 
   async getFeaturedChallenges(params: ListChallengesParams = {}) {
     const variables = this.prepareListVariables(params);
 
-    return this.executeGraphQL({
+    const result = await this.performGraphQLRequest({
       query: FEATURED_CHALLENGES_QUERY,
       variables,
       parser: (payload) => featuredChallengesDataSchema.parse(payload).featuredChallenges
     });
+
+    return result.data;
   }
 
   async listChallenges(params: ListChallengesParams = {}) {
     const variables = this.prepareListVariables(params);
 
-    return this.executeGraphQL({
+    const result = await this.performGraphQLRequest({
       query: CHALLENGES_QUERY,
       variables,
       parser: (payload) => challengesDataSchema.parse(payload).challenges
     });
+
+    return result.data;
   }
 
   async getChallengeAdminList(params: ChallengeListRequest = {}): Promise<ChallengeList> {
     const input = this.prepareChallengeListInput(params);
 
-    return this.executeGraphQL({
+    const result = await this.performGraphQLRequest({
       query: CHALLENGE_ADMIN_LIST_QUERY,
       variables: input ? { input } : undefined,
       parser: (payload) => challengeAdminListDataSchema.parse(payload).challengeAdminList
     });
+
+    return result.data;
   }
 
   async getChallenge(id: string): Promise<Challenge | null> {
@@ -307,7 +516,7 @@ export class TrendPotGraphQLClient {
       throw new Error("A challenge id is required.");
     }
 
-    return this.executeGraphQL({
+    const result = await this.performGraphQLRequest({
       query: CHALLENGE_QUERY,
       variables: { id: normalized },
       parser: (payload) => {
@@ -318,30 +527,133 @@ export class TrendPotGraphQLClient {
         return challenge;
       }
     });
+
+    return result.data;
   }
 
   async createChallenge(input: CreateChallengeInput) {
-    return this.executeGraphQL({
+    const result = await this.performGraphQLRequest({
       query: CREATE_CHALLENGE_MUTATION,
       variables: { input },
       parser: (payload) => createChallengeDataSchema.parse(payload).createChallenge
     });
+
+    return result.data;
   }
 
   async updateChallenge(input: UpdateChallengeInput) {
-    return this.executeGraphQL({
+    const result = await this.performGraphQLRequest({
       query: UPDATE_CHALLENGE_MUTATION,
       variables: { input },
       parser: (payload) => updateChallengeDataSchema.parse(payload).updateChallenge
     });
+
+    return result.data;
   }
 
   async archiveChallenge(input: ArchiveChallengeInput) {
-    return this.executeGraphQL({
+    const result = await this.performGraphQLRequest({
       query: ARCHIVE_CHALLENGE_MUTATION,
       variables: { input },
       parser: (payload) => archiveChallengeDataSchema.parse(payload).archiveChallenge
     });
+
+    return result.data;
+  }
+
+  async getViewer(options: GraphQLOperationOptions = {}): Promise<Viewer> {
+    const result = await this.performGraphQLRequest({
+      query: VIEWER_QUERY,
+      parser: (payload) => viewerDataSchema.parse(payload).viewer,
+      init: options.init
+    });
+
+    return result.data;
+  }
+
+  async requestEmailOtp(
+    input: RequestEmailOtpInput,
+    options: GraphQLOperationOptions = {}
+  ): Promise<EmailOtpChallenge> {
+    const result = await this.performGraphQLRequest({
+      query: REQUEST_EMAIL_OTP_MUTATION,
+      variables: { input },
+      parser: (payload) => requestEmailOtpDataSchema.parse(payload).requestEmailOtp,
+      init: options.init
+    });
+
+    return result.data;
+  }
+
+  async verifyEmailOtp(
+    input: VerifyEmailOtpInput,
+    options: GraphQLOperationOptions & { includeResponse: true }
+  ): Promise<GraphQLExecutionResult<Viewer>>;
+
+  async verifyEmailOtp(
+    input: VerifyEmailOtpInput,
+    options?: GraphQLOperationOptions
+  ): Promise<Viewer>;
+
+  async verifyEmailOtp(input: VerifyEmailOtpInput, options: GraphQLOperationOptions = {}) {
+    const result = await this.performGraphQLRequest({
+      query: VERIFY_EMAIL_OTP_MUTATION,
+      variables: { input },
+      parser: (payload) => verifyEmailOtpDataSchema.parse(payload).verifyEmailOtp,
+      init: options.init
+    });
+
+    if (options.includeResponse) {
+      return result;
+    }
+
+    return result.data;
+  }
+
+  async getViewerSessions(options: GraphQLOperationOptions = {}): Promise<ViewerSession[]> {
+    const result = await this.performGraphQLRequest({
+      query: VIEWER_SESSIONS_QUERY,
+      parser: (payload) => viewerSessionsDataSchema.parse(payload).viewerSessions,
+      init: options.init
+    });
+
+    return result.data;
+  }
+
+  async logoutSession(
+    sessionId: string,
+    options: GraphQLOperationOptions & { includeResponse: true }
+  ): Promise<GraphQLExecutionResult<Viewer>>;
+
+  async logoutSession(sessionId: string, options?: GraphQLOperationOptions): Promise<Viewer>;
+
+  async logoutSession(sessionId: string, options: GraphQLOperationOptions = {}) {
+    const result = await this.performGraphQLRequest({
+      query: LOGOUT_SESSION_MUTATION,
+      variables: { sessionId },
+      parser: (payload) => logoutSessionDataSchema.parse(payload).logoutSession,
+      init: options.init
+    });
+
+    if (options.includeResponse) {
+      return result;
+    }
+
+    return result.data;
+  }
+
+  async revokeSession(
+    sessionId: string,
+    options: GraphQLOperationOptions = {}
+  ): Promise<ViewerSession> {
+    const result = await this.performGraphQLRequest({
+      query: REVOKE_SESSION_MUTATION,
+      variables: { sessionId },
+      parser: (payload) => revokeSessionDataSchema.parse(payload).revokeSession,
+      init: options.init
+    });
+
+    return result.data;
   }
 
   private prepareListVariables(params: ListChallengesParams) {
@@ -388,54 +700,67 @@ export class TrendPotGraphQLClient {
     return Object.keys(input).length > 0 ? input : undefined;
   }
 
-  private createExecutor(): GraphQLExecutor {
-    return async ({ query, variables, parser }) => {
-      const response = await this.fetchFn(`${this.baseUrl}/graphql`, {
-        method: "POST",
-        headers: this.defaultHeaders,
-        body: JSON.stringify({ query, variables }),
-        cache: "no-store"
-      });
-
-      const json = await this.safeJson(response);
-
-      if (!json) {
-        throw new Error(`GraphQL request failed with status ${response.status}`);
-      }
-
-      const parsed = graphQLResponseSchema.parse(json);
-
-      if (parsed.errors && parsed.errors.length > 0) {
-        const messages = parsed.errors.map((error) => error.message);
-        throw new GraphQLRequestError(messages);
-      }
-
-      if (!parsed.data) {
-        throw new Error("GraphQL response did not include a data field.");
-      }
-
-      return parser(parsed.data);
+  private async performGraphQLRequest<TResult>({
+    query,
+    variables,
+    parser,
+    init
+  }: {
+    query: string;
+    variables?: Record<string, unknown>;
+    parser: (payload: unknown) => TResult;
+    init?: RequestInit;
+  }): Promise<GraphQLExecutionResult<TResult>> {
+    const headers: HeadersInit = {
+      ...this.defaultHeaders,
+      ...(init?.headers ?? {})
     };
-  }
 
-  private async safeJson(response: Response): Promise<unknown | null> {
-    const contentType = response.headers.get("content-type");
-    if (!contentType || !contentType.includes("application/json")) {
-      return null;
+    const payload: Record<string, unknown> = { query };
+
+    if (variables && Object.keys(variables).length > 0) {
+      payload.variables = variables;
     }
+
+    const requestInit: RequestInit = {
+      method: "POST",
+      cache: "no-store",
+      ...init,
+      credentials: init?.credentials ?? "include",
+      headers,
+      body: JSON.stringify(payload)
+    };
+
+    const response = await this.fetchFn(`${this.baseUrl}/graphql`, requestInit);
+
+    let parsedPayload: unknown;
 
     try {
-      return await response.json();
+      parsedPayload = await response.json();
     } catch (error) {
-      if (process.env.NODE_ENV !== "production") {
-        console.warn("Failed to parse GraphQL response JSON", error);
-      }
-      return null;
+      throw new GraphQLRequestError([
+        `Failed to parse GraphQL response: ${error instanceof Error ? error.message : String(error)}`
+      ]);
     }
+
+    const parsed = graphQLResponseSchema.parse(parsedPayload);
+
+    if (parsed.errors && parsed.errors.length > 0) {
+      const messages = parsed.errors.map((error) => error.message);
+      throw new GraphQLRequestError(messages);
+    }
+
+    if (typeof parsed.data === "undefined") {
+      throw new GraphQLRequestError(["GraphQL response did not include a data payload."]);
+    }
+
+    const data = parser(parsed.data);
+
+    return { data, response };
   }
 }
 
-export { FEATURED_CHALLENGES_QUERY };
+export { FEATURED_CHALLENGES_QUERY, VIEWER_QUERY };
 export {
   CHALLENGES_QUERY,
   CHALLENGE_QUERY,

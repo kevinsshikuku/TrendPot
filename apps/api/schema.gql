@@ -4,6 +4,19 @@ enum ChallengeStatus {
   ARCHIVED
 }
 
+enum UserRole {
+  FAN
+  CREATOR
+  OPERATOR
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+  PENDING_VERIFICATION
+}
+
 type ChallengeSummary {
   id: String!
   title: String!
@@ -66,6 +79,49 @@ type Health {
   uptime: Float!
 }
 
+type ViewerUser {
+  id: String!
+  email: String!
+  phone: String
+  displayName: String!
+  roles: [UserRole!]!
+  permissions: [String!]!
+  status: UserStatus!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type ViewerSession {
+  id: String!
+  userId: String!
+  rolesSnapshot: [String!]!
+  issuedAt: DateTime!
+  expiresAt: DateTime!
+  ipAddress: String
+  userAgent: String
+  status: String!
+  deviceLabel: String
+  riskLevel: String
+  refreshTokenHash: String!
+  metadata: ViewerSessionMetadata
+}
+
+type ViewerSessionMetadata {
+  device: String
+  riskLevel: String
+}
+
+type Viewer {
+  user: ViewerUser
+  session: ViewerSession
+}
+
+type EmailOtpChallenge {
+  token: String!
+  expiresAt: DateTime!
+  deliveryHint: String!
+}
+
 input ChallengeListFilterInput {
   status: ChallengeStatus
   search: String
@@ -103,18 +159,37 @@ input ArchiveChallengeInput {
   expectedVersion: Int!
 }
 
+input RequestEmailOtpInput {
+  email: String!
+  displayName: String
+  deviceLabel: String
+}
+
+input VerifyEmailOtpInput {
+  email: String!
+  otpCode: String!
+  token: String!
+  deviceLabel: String
+}
+
 type Query {
   featuredChallenges(status: String, limit: Int): [ChallengeSummary!]!
   challenges(status: String, limit: Int): [ChallengeSummary!]!
   challengeAdminList(input: ChallengeListInput): ChallengeList!
   challenge(id: String!): Challenge
   health: Health!
+  viewer: Viewer!
+  viewerSessions: [ViewerSession!]!
 }
 
 type Mutation {
   createChallenge(input: CreateChallengeInput!): Challenge!
   updateChallenge(input: UpdateChallengeInput!): Challenge!
   archiveChallenge(input: ArchiveChallengeInput!): Challenge!
+  requestEmailOtp(input: RequestEmailOtpInput!): EmailOtpChallenge!
+  verifyEmailOtp(input: VerifyEmailOtpInput!): Viewer!
+  logoutSession(sessionId: String!): Viewer!
+  revokeSession(sessionId: String!): ViewerSession!
 }
 
 scalar DateTime
