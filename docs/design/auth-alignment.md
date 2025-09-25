@@ -108,3 +108,12 @@ Collections follow existing repository guidance: ObjectId foreign keys, referenc
 - Backend team to integrate role-based guards using `userRoleSchema` and `permissionSchema` exports.
 - Frontend team to consume the new contracts for gating routes/components while UX flows are designed.
 - Add integration tests verifying serialization/deserialization of the shared contracts once API endpoints are implemented.
+
+
+## Phase 1 Implementation Notes (2025-10-05)
+- Introduced a dedicated `PlatformAuthModule` in the API that manages Mongo collections for users, auth factors, sessions, and audit logs with the indexes described above.
+- Implemented an email OTP flow that hashes codes with an HMAC secret, signs single-use verification tokens, enforces per-identifier rate limits, and emits structured audit log records for enrollment, challenge, and verification events.
+- Session issuance now persists request metadata (IP, user agent, device label) alongside refresh token hashes, and sets HTTP-only, SameSite cookies signed with service secrets for future GraphQL context hydration.
+- Email delivery remains stubbed via structured logging until the transactional provider is wired; secrets and TTLs default via environment variables (`AUTH_OTP_*`, `AUTH_SESSION_*`) to support local development.
+
+

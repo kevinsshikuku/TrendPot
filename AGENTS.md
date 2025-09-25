@@ -82,9 +82,17 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 SENTRY_DSN=
 POSTHOG_KEY=
 
-# Clerk
-CLERK_PUBLISHABLE_KEY=
-CLERK_SECRET_KEY=
+# Auth Service
+AUTH_OTP_HASH_SECRET=dev-otp-hash
+AUTH_OTP_TOKEN_SECRET=dev-otp-token
+AUTH_SESSION_TOKEN_SECRET=dev-session-token
+AUTH_REFRESH_HASH_SECRET=dev-refresh-hash
+AUTH_SESSION_TTL_HOURS=24
+AUTH_REFRESH_TTL_DAYS=14
+AUTH_OTP_WINDOW_MINUTES=10
+AUTH_OTP_MAX_REQUESTS=5
+AUTH_SESSION_COOKIE_NAME=trendpot.sid
+AUTH_REFRESH_COOKIE_NAME=trendpot.refresh
 
 # Mongo
 MONGODB_URI=mongodb://localhost:27017/trendpot
@@ -131,8 +139,14 @@ Use Mongoose 8 schemas + MongoDB **JSON Schema validators**. Default IDs are **O
 
 **Collections & Indexes (short):**
 
-* `users` — `{ clerkUserId, handle, phoneE164, ... }`
-  Indexes: unique `{clerkUserId:1}`, unique `{handle:1}`, sparse `{phoneE164:1}`
+* `users` — `{ email, phone, roles[], status, displayName, metadata, audit }`
+  Indexes: unique `{email:1}`, unique sparse `{phone:1}`
+* `auth_factors` — `{ userId, type, channel, secretHash, attempts, expiresAt, status }`
+  Indexes: compound `{userId:1,type:1,channel:1}`, TTL `{expiresAt:1}`
+* `sessions` — `{ userId, rolesSnapshot, issuedAt, expiresAt, refreshTokenHash, ipAddress, userAgent, metadata }`
+  Indexes: unique `{refreshTokenHash:1}`, compound `{userId:1,issuedAt:-1}`, TTL `{expiresAt:1}`
+* `audit_logs` — `{ actorId, actorRoles, action, targetId, context, severity, createdAt }`
+  Indexes: compound `{actorId:1,createdAt:-1}`, text `{context.summary:"text"}`
 * `tiktok_accounts` — OAuth tokens (encrypted), `{ userId, openId, ... }`
   Indexes: `{userId:1}`, unique `{openId:1}`
 * `videos` — TikTok video refs + metrics
