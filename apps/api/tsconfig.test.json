@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist-tests",
+    "noEmit": false,
+    "typeRoots": ["../../types/custom"],
+    "types": [],
+    "baseUrl": ".",
+    "paths": {
+      "@trendpot/types": ["../../packages/types/src"]
+    }
+  },
+  "include": ["src/app.service.ts", "src/models/**/*.ts", "src/**/*.test.ts"],
+  "exclude": ["dist", "dist-tests"]
+}

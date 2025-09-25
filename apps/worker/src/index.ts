@@ -1,24 +1,13 @@
 import { Queue, Worker } from "bullmq";
 import IORedis from "ioredis";
-import { challengeLeaderboardSchema } from "@trendpot/types";
 import { withRetries } from "@trendpot/utils";
+import { createLeaderboardJobHandler } from "./leaderboard-job";
 
 const connection = new IORedis(process.env.REDIS_URL ?? "redis://localhost:6379");
 
 export const leaderboardQueue = new Queue("leaderboard", { connection });
 
-const jobHandler = async () => {
-  const payload = challengeLeaderboardSchema.parse({
-    generatedAt: new Date().toISOString(),
-    leaders: [
-      { id: "sunset-sprint", title: "Sunset Sprint", score: 98 },
-      { id: "duet-drive", title: "Duet Drive", score: 83 },
-      { id: "nightwave", title: "Nightwave", score: 75 }
-    ]
-  });
-
-  return payload;
-};
+const jobHandler = createLeaderboardJobHandler();
 
 const worker = new Worker(
   leaderboardQueue.name,

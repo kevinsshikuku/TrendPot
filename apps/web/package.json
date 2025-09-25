@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "format": "prettier --check ."
+    "format": "prettier --check .",
+    "test": "NODE_PATH=../../test-shims node --loader ../../test-shims/ts-loader.mjs --test src"
   },
   "dependencies": {
     "@tanstack/react-query": "5.37.1",

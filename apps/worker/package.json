@@ -7,7 +7,8 @@
     "start": "node dist/index.js",
     "build": "tsc -p tsconfig.json",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
-    "format": "prettier --check \"src/**/*.{ts,tsx}\""
+    "format": "prettier --check \"src/**/*.{ts,tsx}\"",
+    "test": "NODE_PATH=../../test-shims node --loader ../../test-shims/ts-loader.mjs --test src"
   },
   "dependencies": {
     "bullmq": "4.11.4",

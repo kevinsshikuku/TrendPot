@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "outDir": "dist-tests",
+    "noEmit": false,
+    "typeRoots": ["../../types/custom"],
+    "baseUrl": ".",
+    "paths": {
+      "@trendpot/ui": ["../../packages/ui/src"],
+      "@trendpot/utils": ["../../packages/utils/src"],
+      "@trendpot/types": ["../../packages/types/src"]
+    }
+  },
+  "include": ["src/lib/**/*.ts", "src/**/*.test.ts"],
+  "exclude": ["dist-tests"]
+}

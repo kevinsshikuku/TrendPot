@@ -116,7 +116,7 @@
 - ☑ **Author seed scripts for Mongo fixtures (challenges, sample users, submissions) and document runbooks.** _(Owner: Backend)_
   - Notes: 2024-06-06 – AI – Added Mongo seed script and seeding runbook.
 - ☐ **Establish unit/integration test harnesses across apps (`web`, `api`, `worker`) with CI pipelines wired.** _(Owner: DX)_
-  - Notes:
+  - Notes: 2025-09-25 – AI – Added Node test harnesses for web/api/worker with representative coverage and scripts.
 - ☐ **Implement structured logging (request IDs, correlation IDs) and baseline error envelopes across API + worker.** _(Owner: Platform)_
   - Notes:
 - ☐ **Capture responsive desktop/mobile design references for baseline pages (`/`, `/challenges`, `/c/[slug]`).** _(Owner: Design)_
