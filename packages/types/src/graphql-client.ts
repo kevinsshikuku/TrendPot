@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { challengeSchema, challengeSummaryListSchema } from "./challenges";
+import {
+  challengeListSchema,
+  challengeSchema,
+  challengeSummaryListSchema
+} from "./challenges";
+import type { ChallengeList } from "./challenges";
 import type { Challenge } from "./challenges";
 
 export interface TrendPotGraphQLClientOptions {
@@ -13,6 +18,17 @@ export interface ListChallengesParams {
   limit?: number;
 }
 
+export interface ChallengeListFilters {
+  status?: string;
+  search?: string;
+}
+
+export interface ChallengeListRequest {
+  first?: number;
+  after?: string;
+  filter?: ChallengeListFilters;
+}
+
 export interface CreateChallengeInput {
   id: string;
   title: string;
@@ -21,6 +37,29 @@ export interface CreateChallengeInput {
   goal: number;
   currency?: string;
   status?: string;
+}
+
+export interface UpdateChallengeInput {
+  id: string;
+  expectedVersion: number;
+  title?: string;
+  tagline?: string;
+  description?: string;
+  goal?: number;
+  currency?: string;
+  status?: string;
+}
+
+export interface ArchiveChallengeInput {
+  id: string;
+  expectedVersion: number;
+}
+
+export class GraphQLRequestError extends Error {
+  constructor(readonly messages: string[]) {
+    super(messages.join(" | "));
+    this.name = "GraphQLRequestError";
+  }
 }
 
 const graphQLResponseSchema = z.object({
@@ -48,6 +87,9 @@ const FEATURED_CHALLENGES_QUERY = /* GraphQL */ `
       raised
       goal
       currency
+      status
+      updatedAt
+      version
     }
   }
 `;
@@ -65,6 +107,9 @@ const CHALLENGES_QUERY = /* GraphQL */ `
       raised
       goal
       currency
+      status
+      updatedAt
+      version
     }
   }
 `;
@@ -82,10 +127,11 @@ const CHALLENGE_QUERY = /* GraphQL */ `
       raised
       goal
       currency
-      description
       status
-      createdAt
       updatedAt
+      version
+      description
+      createdAt
     }
   }
 `;
@@ -103,10 +149,95 @@ const CREATE_CHALLENGE_MUTATION = /* GraphQL */ `
       raised
       goal
       currency
-      description
       status
-      createdAt
       updatedAt
+      version
+      description
+      createdAt
+    }
+  }
+`;
+
+const challengeAdminListDataSchema = z.object({
+  challengeAdminList: challengeListSchema
+});
+
+const CHALLENGE_ADMIN_LIST_QUERY = /* GraphQL */ `
+  query ChallengeAdminList($input: ChallengeListInput) {
+    challengeAdminList(input: $input) {
+      edges {
+        cursor
+        node {
+          id
+          title
+          tagline
+          raised
+          goal
+          currency
+          status
+          updatedAt
+          version
+        }
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+      analytics {
+        totalChallenges
+        totalRaised
+        totalGoal
+        averageCompletion
+        statusBreakdown {
+          draft
+          live
+          archived
+        }
+      }
+    }
+  }
+`;
+
+const updateChallengeDataSchema = z.object({
+  updateChallenge: challengeSchema
+});
+
+const UPDATE_CHALLENGE_MUTATION = /* GraphQL */ `
+  mutation UpdateChallenge($input: UpdateChallengeInput!) {
+    updateChallenge(input: $input) {
+      id
+      title
+      tagline
+      raised
+      goal
+      currency
+      status
+      updatedAt
+      version
+      description
+      createdAt
+    }
+  }
+`;
+
+const archiveChallengeDataSchema = z.object({
+  archiveChallenge: challengeSchema
+});
+
+const ARCHIVE_CHALLENGE_MUTATION = /* GraphQL */ `
+  mutation ArchiveChallenge($input: ArchiveChallengeInput!) {
+    archiveChallenge(input: $input) {
+      id
+      title
+      tagline
+      raised
+      goal
+      currency
+      status
+      updatedAt
+      version
+      description
+      createdAt
     }
   }
 `;
@@ -159,6 +290,16 @@ export class TrendPotGraphQLClient {
     });
   }
 
+  async getChallengeAdminList(params: ChallengeListRequest = {}): Promise<ChallengeList> {
+    const input = this.prepareChallengeListInput(params);
+
+    return this.executeGraphQL({
+      query: CHALLENGE_ADMIN_LIST_QUERY,
+      variables: input ? { input } : undefined,
+      parser: (payload) => challengeAdminListDataSchema.parse(payload).challengeAdminList
+    });
+  }
+
   async getChallenge(id: string): Promise<Challenge | null> {
     const normalized = id.trim();
 
@@ -187,6 +328,22 @@ export class TrendPotGraphQLClient {
     });
   }
 
+  async updateChallenge(input: UpdateChallengeInput) {
+    return this.executeGraphQL({
+      query: UPDATE_CHALLENGE_MUTATION,
+      variables: { input },
+      parser: (payload) => updateChallengeDataSchema.parse(payload).updateChallenge
+    });
+  }
+
+  async archiveChallenge(input: ArchiveChallengeInput) {
+    return this.executeGraphQL({
+      query: ARCHIVE_CHALLENGE_MUTATION,
+      variables: { input },
+      parser: (payload) => archiveChallengeDataSchema.parse(payload).archiveChallenge
+    });
+  }
+
   private prepareListVariables(params: ListChallengesParams) {
     const variables: Record<string, unknown> = {};
 
@@ -199,6 +356,36 @@ export class TrendPotGraphQLClient {
     }
 
     return variables;
+  }
+
+  private prepareChallengeListInput(params: ChallengeListRequest) {
+    const input: Record<string, unknown> = {};
+
+    if (typeof params.first === "number" && Number.isFinite(params.first) && params.first > 0) {
+      input.first = Math.floor(params.first);
+    }
+
+    if (params.after && params.after.length > 0) {
+      input.after = params.after;
+    }
+
+    if (params.filter) {
+      const filter: Record<string, unknown> = {};
+
+      if (params.filter.status && params.filter.status.length > 0) {
+        filter.status = params.filter.status;
+      }
+
+      if (params.filter.search && params.filter.search.trim().length > 0) {
+        filter.search = params.filter.search.trim();
+      }
+
+      if (Object.keys(filter).length > 0) {
+        input.filter = filter;
+      }
+    }
+
+    return Object.keys(input).length > 0 ? input : undefined;
   }
 
   private createExecutor(): GraphQLExecutor {
@@ -219,8 +406,8 @@ export class TrendPotGraphQLClient {
       const parsed = graphQLResponseSchema.parse(json);
 
       if (parsed.errors && parsed.errors.length > 0) {
-        const message = parsed.errors.map((error) => error.message).join(", ");
-        throw new Error(`GraphQL responded with errors: ${message}`);
+        const messages = parsed.errors.map((error) => error.message);
+        throw new GraphQLRequestError(messages);
       }
 
       if (!parsed.data) {
@@ -249,4 +436,11 @@ export class TrendPotGraphQLClient {
 }
 
 export { FEATURED_CHALLENGES_QUERY };
-export { CHALLENGES_QUERY, CHALLENGE_QUERY, CREATE_CHALLENGE_MUTATION };
+export {
+  CHALLENGES_QUERY,
+  CHALLENGE_QUERY,
+  CREATE_CHALLENGE_MUTATION,
+  CHALLENGE_ADMIN_LIST_QUERY,
+  UPDATE_CHALLENGE_MUTATION,
+  ARCHIVE_CHALLENGE_MUTATION
+};

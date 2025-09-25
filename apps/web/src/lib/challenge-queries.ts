@@ -1,5 +1,13 @@
-import type { Challenge, ChallengeSummary, CreateChallengeInput } from "@trendpot/types";
-import { apiClient } from "./api-client";
+import type {
+  ArchiveChallengeInput,
+  Challenge,
+  ChallengeList,
+  ChallengeListRequest,
+  ChallengeSummary,
+  CreateChallengeInput,
+  UpdateChallengeInput
+} from "@trendpot/types";
+import { GraphQLRequestError, apiClient } from "./api-client";
 
 export const featuredChallengesParams = { status: "live", limit: 6 } as const;
 export const FEATURED_CHALLENGE_LIMIT = featuredChallengesParams.limit;
@@ -27,6 +35,21 @@ export const challengesQueryOptions = (params: { status?: string } = {}) => ({
   queryFn: () => fetchChallenges(params)
 });
 
+export const challengeAdminListQueryKey = (params: ChallengeListRequest = {}) => [
+  "challenges",
+  "admin",
+  params
+] as const;
+
+export const fetchChallengeAdminList = async (params: ChallengeListRequest = {}): Promise<ChallengeList> => {
+  return apiClient.getChallengeAdminList(params);
+};
+
+export const challengeAdminListQueryOptions = (params: ChallengeListRequest = {}) => ({
+  queryKey: challengeAdminListQueryKey(params),
+  queryFn: () => fetchChallengeAdminList(params)
+});
+
 export const challengeQueryKey = (id: string) => ["challenges", "detail", id] as const;
 
 export const fetchChallenge = async (id: string): Promise<Challenge | null> => {
@@ -39,5 +62,34 @@ export const challengeQueryOptions = (id: string) => ({
 });
 
 export const createChallengeMutation = async (input: CreateChallengeInput) => {
-  return apiClient.createChallenge(input);
+  try {
+    return await apiClient.createChallenge(input);
+  } catch (error) {
+    if (error instanceof GraphQLRequestError && error.messages.length > 0) {
+      throw new Error(error.messages[0]);
+    }
+    throw error;
+  }
+};
+
+export const updateChallengeMutation = async (input: UpdateChallengeInput) => {
+  try {
+    return await apiClient.updateChallenge(input);
+  } catch (error) {
+    if (error instanceof GraphQLRequestError && error.messages.length > 0) {
+      throw new Error(error.messages[0]);
+    }
+    throw error;
+  }
+};
+
+export const archiveChallengeMutation = async (input: ArchiveChallengeInput) => {
+  try {
+    return await apiClient.archiveChallenge(input);
+  } catch (error) {
+    if (error instanceof GraphQLRequestError && error.messages.length > 0) {
+      throw new Error(error.messages[0]);
+    }
+    throw error;
+  }
 };
