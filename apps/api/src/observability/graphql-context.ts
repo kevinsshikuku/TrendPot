@@ -4,6 +4,7 @@ import type { Logger } from "pino";
 import { resolveAuthContext } from "../auth/auth-context";
 import type { AuthenticatedSession, AuthenticatedUser } from "../auth/auth.types";
 import { createRequestLogger } from "./logger";
+import { PlatformAuthService } from "../platform-auth/platform-auth.service";
 
 export interface GraphQLContext extends MercuriusContext {
   requestId: string;
@@ -19,12 +20,13 @@ export interface GraphQLContext extends MercuriusContext {
  */
 export const buildGraphQLContext = async (
   request: FastifyRequest,
-  reply: FastifyReply
+  reply: FastifyReply,
+  authService: PlatformAuthService
 ): Promise<GraphQLContext> => {
   const requestId = String(request.id);
   reply.header("x-request-id", requestId);
   const logger = createRequestLogger(requestId);
-  const auth = resolveAuthContext(request, logger);
+  const auth = await resolveAuthContext(request, logger, authService);
 
   return {
     app: reply.server,

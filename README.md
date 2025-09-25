@@ -96,7 +96,7 @@ Safaricom Daraja (M‑Pesa): STK Push, optional C2B; later B2C payouts
 
 
 Auth & Sessions
-In-house NestJS auth service (email OTP + session cookies). TikTok OAuth handled server-side in backend.
+In-house NestJS auth service with TikTok OpenAuth and signed session cookies handled entirely server-side.
 
 
 Infra & Ops
@@ -189,12 +189,6 @@ users { _id, email, phone, roles[], status, displayName, metadata, audit, create
 
 
 Indexes: { email: 1 } unique, { phone: 1 } unique sparse
-
-
-auth_factors { _id, userId, type, channel, secretHash, attempts, expiresAt, status, createdAt, updatedAt }
-
-
-Indexes: { userId: 1, type: 1, channel: 1 }, { expiresAt: 1 } TTL
 
 
 sessions { _id, userId, rolesSnapshot, issuedAt, expiresAt, refreshTokenHash, ipAddress, userAgent, status, metadata }
@@ -604,7 +598,7 @@ Modules: AuthModule, UsersModule, TikTokModule, ChallengesModule, SubmissionsMod
 Providers: MongoProvider (Mongoose connection), RedisProvider, BullProvider (queues), TikTokClient, MpesaClient.
 
 
-Guards: Platform session guard + RolesGuard (email OTP sessions). Interceptors: RateLimit (in-memory for auth/admin), RequestId, Logging.
+Guards: Platform session guard + RolesGuard (TikTok-issued sessions). Interceptors: RateLimit (Redis-backed for auth/admin), RequestId, Logging.
 
 
 DTO Validation: Zod schemas; map to GraphQL input types via Nest decorators (code-first).

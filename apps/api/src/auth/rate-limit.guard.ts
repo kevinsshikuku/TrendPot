@@ -20,7 +20,7 @@ export class RateLimitGuard implements CanActivate {
     private readonly audit: AuthAuditService
   ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const gqlContext = GqlExecutionContext.create(context);
     const info = gqlContext.getInfo<GraphQLResolveInfo>();
     const ctx = gqlContext.getContext<GraphQLContext>();
@@ -32,7 +32,7 @@ export class RateLimitGuard implements CanActivate {
       ]) ?? DEFAULT_RATE_LIMIT;
 
     const identifier = `${ctx.request.ip ?? "unknown"}:${info.fieldName}`;
-    const { allowed, retryAt } = this.rateLimitService.consume(identifier, options);
+    const { allowed, retryAt } = await this.rateLimitService.consume(identifier, options);
 
     if (!allowed) {
       this.audit.recordRateLimitViolation({

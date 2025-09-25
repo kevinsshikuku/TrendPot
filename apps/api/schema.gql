@@ -81,9 +81,13 @@ type Health {
 
 type ViewerUser {
   id: String!
-  email: String!
+  email: String
   phone: String
   displayName: String!
+  avatarUrl: String
+  tiktokUserId: String
+  tiktokUsername: String
+  tiktokScopes: [String!]!
   roles: [UserRole!]!
   permissions: [String!]!
   status: UserStatus!
@@ -114,10 +118,12 @@ type Viewer {
   session: ViewerSession
 }
 
-type EmailOtpChallenge {
-  token: String!
-  expiresAt: DateTime!
-  deliveryHint: String!
+type TikTokLoginIntent {
+  state: String!
+  clientKey: String!
+  redirectUri: String!
+  scopes: [String!]!
+  returnPath: String
 }
 input ChallengeListFilterInput {
   status: ChallengeStatus
@@ -156,17 +162,22 @@ input ArchiveChallengeInput {
   expectedVersion: Int!
 }
 
-input RequestEmailOtpInput {
-  email: String!
-  displayName: String
+input StartTikTokLoginInput {
+  scopes: [String!]
+  returnPath: String
+  redirectUri: String
   deviceLabel: String
 }
 
-input VerifyEmailOtpInput {
-  email: String!
-  otpCode: String!
-  token: String!
+input CompleteTikTokLoginInput {
+  code: String!
+  state: String!
   deviceLabel: String
+}
+
+input UpdateViewerProfileInput {
+  displayName: String
+  phone: String
 }
 
 type Query {
@@ -183,8 +194,9 @@ type Mutation {
   createChallenge(input: CreateChallengeInput!): Challenge!
   updateChallenge(input: UpdateChallengeInput!): Challenge!
   archiveChallenge(input: ArchiveChallengeInput!): Challenge!
-  requestEmailOtp(input: RequestEmailOtpInput!): EmailOtpChallenge!
-  verifyEmailOtp(input: VerifyEmailOtpInput!): Viewer!
+  startTikTokLogin(input: StartTikTokLoginInput): TikTokLoginIntent!
+  completeTikTokLogin(input: CompleteTikTokLoginInput!): Viewer!
+  updateViewerProfile(input: UpdateViewerProfileInput!): ViewerUser!
   logoutSession(sessionId: String!): Viewer!
   revokeSession(sessionId: String!): ViewerSession!
 }

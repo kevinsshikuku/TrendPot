@@ -1,38 +1,10 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { userSchema, viewerSessionSchema, type User, type ViewerSession } from "@trendpot/types";
-import { AUTH_SESSION_COOKIE_NAME, AUTH_USER_COOKIE_NAME } from "./src/lib/api-client";
+import type { Viewer } from "@trendpot/types";
 import { resolveNextPath } from "./src/lib/navigation";
 
-function decodeBase64Url(value: string) {
-  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
-  const padLength = (4 - (normalized.length % 4)) % 4;
-  const padded = normalized + "=".repeat(padLength);
-  const binary = atob(padded);
-  const bytes = new Uint8Array(binary.length);
-
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-
-  return new TextDecoder().decode(bytes);
-}
-
-function decodeCookie<T>(value: string | undefined, schema: { safeParse: (data: unknown) => { success: true; data: T } | { success: false } }): T | null {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    const json = decodeBase64Url(value);
-    const parsed = schema.safeParse(JSON.parse(json));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
-
 const ADMIN_ROLES = new Set(["operator", "admin"]);
+const SESSION_COOKIE_NAME = process.env.AUTH_SESSION_COOKIE_NAME ?? "trendpot.sid";
 
 function buildLoginRedirect(request: NextRequest) {
   const url = new URL("/login", request.url);
@@ -43,17 +15,53 @@ function buildLoginRedirect(request: NextRequest) {
   return url;
 }
 
-export function middleware(request: NextRequest) {
+async function loadViewer(request: NextRequest): Promise<Viewer | null> {
+  const cookieHeader = request.headers.get("cookie") ?? "";
+
+  if (!cookieHeader) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(new URL("/api/auth/viewer", request.url), {
+      headers: {
+        cookie: cookieHeader,
+        "x-requested-with": "middleware"
+      },
+      cache: "no-store",
+      credentials: "include"
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = (await response.json()) as { viewer?: Viewer };
+    return payload?.viewer ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  const userCookie = request.cookies.get(AUTH_USER_COOKIE_NAME)?.value;
-  const sessionCookie = request.cookies.get(AUTH_SESSION_COOKIE_NAME)?.value;
-
-  const user = decodeCookie<User>(userCookie, userSchema);
-  const session = decodeCookie<ViewerSession>(sessionCookie, viewerSessionSchema);
-  const isAuthenticated = Boolean(user && session);
+  if (pathname.startsWith("/api/")) {
+    return NextResponse.next();
+  }
 
   const isAuthRoute = pathname === "/login" || pathname === "/signup" || pathname.startsWith("/auth/verify");
+  const hasSessionCookie = Boolean(request.cookies.get(SESSION_COOKIE_NAME)?.value);
+
+  let viewer: Viewer | null = null;
+  let isAuthenticated = false;
+
+  if (hasSessionCookie && (isAuthRoute || pathname.startsWith("/account") || pathname.startsWith("/admin"))) {
+    viewer = await loadViewer(request);
+    isAuthenticated = Boolean(viewer?.user && viewer?.session);
+  } else {
+    isAuthenticated = hasSessionCookie;
+  }
 
   if (isAuthenticated && isAuthRoute) {
     const nextParam = resolveNextPath(request.nextUrl.searchParams.get("next"));
@@ -72,7 +80,7 @@ export function middleware(request: NextRequest) {
       return NextResponse.redirect(buildLoginRedirect(request));
     }
 
-    const hasRole = user?.roles?.some((role) => ADMIN_ROLES.has(role)) ?? false;
+    const hasRole = viewer?.user?.roles?.some((role) => ADMIN_ROLES.has(role)) ?? false;
     if (!hasRole) {
       const accountUrl = new URL("/account", request.url);
       accountUrl.searchParams.set("error", "forbidden");

@@ -56,17 +56,17 @@ This document is the single source of truth for how TrendPot is wired end-to-end
 ### Authentication flows (`/login`, `/signup`, `/auth/verify`)
 * Files: `apps/web/src/app/(auth)/login/page.tsx`, `apps/web/src/app/(auth)/signup/page.tsx`, `apps/web/src/app/auth/verify/page.tsx`
 * Responsibilities:
-  * Render passwordless enrollment/login experiences with responsive cards, adaptive typography, and sticky call-to-action buttons on mobile viewports.
-  * Use React Query mutations that call internal API routes (`/api/auth/request-otp`, `/api/auth/verify-otp`) which proxy GraphQL auth mutations, forward Fastify cookies, and capture viewer/session payload cookies for subsequent requests.
-  * Respect the `next` query param propagated by middleware so successful verifications return viewers to their original destination.
+  * Present a TikTok-first authentication CTA while preserving responsive layouts and sticky call-to-action buttons on mobile viewports.
+  * Use React Query mutations that call the `/api/auth/tiktok/callback` bridge after obtaining a login intent from `startTikTokLogin`, allowing Fastify to mint HTTP-only cookies server-side.
+  * Respect the `next` query param propagated by middleware so successful logins return viewers to their original destination.
 * Client flow:
-  1. User submits email (and display name for signup); `requestEmailOtp` mutation posts to `/api/auth/request-otp` and navigates to `/auth/verify` with challenge metadata.
-  2. OTP form enforces numeric entry, sends `{ email, otpCode, token, deviceLabel }` to `/api/auth/verify-otp`, and redirects to `/account` or the sanitised `next` path on success.
-  3. Error states surface toast-style inline banners; CTAs remain sticky on small screens and copy scales with Tailwind responsive tokens.
+  1. User taps **Continue with TikTok**; `startTikTokLogin` retrieves the client key, scopes, and redirect URI which are passed to the TikTok OpenSDK.
+  2. TikTok redirects to `/api/auth/tiktok/callback` with `{ code, state }`; the backend exchanges the code, links or creates the user, issues cookies, and redirects to the stored `next` path.
+  3. The frontend invalidates `viewer` to hydrate the authenticated shell and progressively requests additional profile details only when privileged actions require them.
 * Session management:
-  * API routes persist `trendpot.user` / `trendpot.session` cookies (base64-encoded viewer + session payload) and forward server-set session/refresh cookies for the NestJS service.
-  * `apps/web/middleware.ts` enforces login for `/account` and `/admin` routes, redirects unauthenticated users back through `/login?next=…`, and blocks non-admin roles with a friendly `/account?error=forbidden` banner.
-* Validation coverage: `apps/api/src/platform-auth.e2e.test.ts` exercises the passwordless registration/login flow, ensures refresh-token hashing matches issued cookies, and asserts admin mutations remain role-gated.
+  * API routes forward backend-issued session cookies without minting writable viewer payloads and clear legacy `trendpot.user` / `trendpot.session` values on login/logout.
+  * `apps/web/middleware.ts` uses the signed session cookie plus an internal viewer lookup to enforce login for `/account` and `/admin`, redirecting unauthenticated users back through `/login?next=…` and blocking non-admin roles with a friendly `/account?error=forbidden` banner.
+* Validation coverage: TikTok OAuth completion and session issuance are currently verified through service-level tests and manual QA pending rebuilt end-to-end coverage for the new flow.
 
 ### Account dashboard (`/account`, `/me`)
 * File: `apps/web/src/app/account/page.tsx`
@@ -91,7 +91,7 @@ At this time there are no additional auth routes blocked. Future UX work will fo
 * Client wrapper: `TrendPotGraphQLClient` in `packages/types/src/graphql-client.ts`.
   * Configures base URL via `NEXT_PUBLIC_API_URL` → `API_BASE_URL` → fallback `http://localhost:4000` (`apps/web/src/lib/api-client.ts`).
   * Enforces JSON content-type, surfaces GraphQL errors, and validates responses with Zod before returning to callers.
-  * Auth helpers: `requestEmailOtp`, `verifyEmailOtp`, `getViewer`, `getViewerSessions`, `logoutSession`, and `revokeSession` now expose GraphQL mutations/queries for platform auth; Next API routes consume these to bridge cookies between Fastify and the browser.
+  * Auth helpers: `startTikTokLogin`, `completeTikTokLogin`, `getViewer`, `getViewerSessions`, `logoutSession`, and `revokeSession` expose GraphQL mutations/queries for platform auth; Next API routes consume these to bridge cookies between Fastify and the browser.
 
 ### Featured challenge pipeline
 1. **Frontend query (React Query)**

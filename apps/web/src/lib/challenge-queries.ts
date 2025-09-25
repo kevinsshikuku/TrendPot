@@ -8,6 +8,7 @@ import type {
   UpdateChallengeInput
 } from "@trendpot/types";
 import { GraphQLRequestError, apiClient } from "./api-client";
+import { ProfileCompletionRequiredError } from "./errors";
 
 export const featuredChallengesParams = { status: "live", limit: 6 } as const;
 export const FEATURED_CHALLENGE_LIMIT = featuredChallengesParams.limit;
@@ -66,6 +67,13 @@ export const createChallengeMutation = async (input: CreateChallengeInput) => {
     return await apiClient.createChallenge(input);
   } catch (error) {
     if (error instanceof GraphQLRequestError && error.messages.length > 0) {
+      const profileError = error.errors.find((entry) => entry.extensions?.code === "PROFILE_INCOMPLETE");
+      if (profileError) {
+        const missingFields = Array.isArray(profileError.extensions?.missingFields)
+          ? (profileError.extensions?.missingFields as string[])
+          : [];
+        throw new ProfileCompletionRequiredError(missingFields, profileError.message);
+      }
       throw new Error(error.messages[0]);
     }
     throw error;
@@ -77,6 +85,13 @@ export const updateChallengeMutation = async (input: UpdateChallengeInput) => {
     return await apiClient.updateChallenge(input);
   } catch (error) {
     if (error instanceof GraphQLRequestError && error.messages.length > 0) {
+      const profileError = error.errors.find((entry) => entry.extensions?.code === "PROFILE_INCOMPLETE");
+      if (profileError) {
+        const missingFields = Array.isArray(profileError.extensions?.missingFields)
+          ? (profileError.extensions?.missingFields as string[])
+          : [];
+        throw new ProfileCompletionRequiredError(missingFields, profileError.message);
+      }
       throw new Error(error.messages[0]);
     }
     throw error;
@@ -88,6 +103,13 @@ export const archiveChallengeMutation = async (input: ArchiveChallengeInput) => 
     return await apiClient.archiveChallenge(input);
   } catch (error) {
     if (error instanceof GraphQLRequestError && error.messages.length > 0) {
+      const profileError = error.errors.find((entry) => entry.extensions?.code === "PROFILE_INCOMPLETE");
+      if (profileError) {
+        const missingFields = Array.isArray(profileError.extensions?.missingFields)
+          ? (profileError.extensions?.missingFields as string[])
+          : [];
+        throw new ProfileCompletionRequiredError(missingFields, profileError.message);
+      }
       throw new Error(error.messages[0]);
     }
     throw error;

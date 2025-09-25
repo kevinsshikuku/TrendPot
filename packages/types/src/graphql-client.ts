@@ -6,12 +6,8 @@ import {
 } from "./challenges";
 import type { ChallengeList } from "./challenges";
 import type { Challenge } from "./challenges";
-import {
-  emailOtpChallengeSchema,
-  viewerSchema,
-  viewerSessionSchema
-} from "./auth";
-import type { EmailOtpChallenge, Viewer, ViewerSession } from "./auth";
+import { viewerSchema, viewerSessionSchema, userSchema } from "./auth";
+import type { TikTokLoginIntent, Viewer, ViewerSession, User } from "./auth";
 
 
 export interface TrendPotGraphQLClientOptions {
@@ -72,23 +68,40 @@ export interface GraphQLExecutionResult<TResult> {
   response: Response;
 }
 
-export interface RequestEmailOtpInput {
-  email: string;
-  displayName?: string;
+export interface StartTikTokLoginInput {
+  scopes?: string[];
+  returnPath?: string;
+  redirectUri?: string;
   deviceLabel?: string;
 }
 
-export interface VerifyEmailOtpInput {
-  email: string;
-  otpCode: string;
-  token: string;
+export interface CompleteTikTokLoginInput {
+  code: string;
+  state: string;
   deviceLabel?: string;
+}
+
+export interface UpdateViewerProfileInput {
+  displayName?: string;
+  phone?: string;
+}
+export interface GraphQLErrorPayload {
+  message: string;
+  path?: (string | number)[];
+  extensions?: Record<string, unknown>;
 }
 
 export class GraphQLRequestError extends Error {
-  constructor(readonly messages: string[]) {
-    super(messages.join(" | "));
+  readonly errors: GraphQLErrorPayload[];
+
+  constructor(errors: GraphQLErrorPayload[]) {
+    super(errors.map((error) => error.message).join(" | "));
     this.name = "GraphQLRequestError";
+    this.errors = errors;
+  }
+
+  get messages(): string[] {
+    return this.errors.map((error) => error.message);
   }
 }
 
@@ -98,7 +111,8 @@ const graphQLResponseSchema = z.object({
     .array(
       z.object({
         message: z.string(),
-        path: z.array(z.union([z.string(), z.number()])).optional()
+        path: z.array(z.union([z.string(), z.number()])).optional(),
+        extensions: z.record(z.unknown()).optional()
       })
     )
     .optional()
@@ -240,6 +254,10 @@ const VIEWER_QUERY = /* GraphQL */ `
         email
         phone
         displayName
+        avatarUrl
+        tiktokUserId
+        tiktokUsername
+        tiktokScopes
         roles
         permissions
         status
@@ -267,32 +285,38 @@ const VIEWER_QUERY = /* GraphQL */ `
   }
 `;
 
-const requestEmailOtpDataSchema = z.object({
-  requestEmailOtp: emailOtpChallengeSchema
+const startTikTokLoginDataSchema = z.object({
+  startTikTokLogin: tiktokLoginIntentSchema
 });
 
-const REQUEST_EMAIL_OTP_MUTATION = /* GraphQL */ `
-  mutation RequestEmailOtp($input: RequestEmailOtpInput!) {
-    requestEmailOtp(input: $input) {
-      token
-      expiresAt
-      deliveryHint
+const START_TIKTOK_LOGIN_MUTATION = /* GraphQL */ `
+  mutation StartTikTokLogin($input: StartTikTokLoginInput) {
+    startTikTokLogin(input: $input) {
+      state
+      clientKey
+      redirectUri
+      scopes
+      returnPath
     }
   }
 `;
 
-const verifyEmailOtpDataSchema = z.object({
-  verifyEmailOtp: viewerSchema
+const completeTikTokLoginDataSchema = z.object({
+  completeTikTokLogin: viewerSchema
 });
 
-const VERIFY_EMAIL_OTP_MUTATION = /* GraphQL */ `
-  mutation VerifyEmailOtp($input: VerifyEmailOtpInput!) {
-    verifyEmailOtp(input: $input) {
+const COMPLETE_TIKTOK_LOGIN_MUTATION = /* GraphQL */ `
+  mutation CompleteTikTokLogin($input: CompleteTikTokLoginInput!) {
+    completeTikTokLogin(input: $input) {
       user {
         id
         email
         phone
         displayName
+        avatarUrl
+        tiktokUserId
+        tiktokUsername
+        tiktokScopes
         roles
         permissions
         status
@@ -316,6 +340,30 @@ const VERIFY_EMAIL_OTP_MUTATION = /* GraphQL */ `
           riskLevel
         }
       }
+    }
+  }
+`;
+
+const updateViewerProfileDataSchema = z.object({
+  updateViewerProfile: userSchema
+});
+
+const UPDATE_VIEWER_PROFILE_MUTATION = /* GraphQL */ `
+  mutation UpdateViewerProfile($input: UpdateViewerProfileInput!) {
+    updateViewerProfile(input: $input) {
+      id
+      email
+      phone
+      displayName
+      avatarUrl
+      tiktokUserId
+      tiktokUsername
+      tiktokScopes
+      roles
+      permissions
+      status
+      createdAt
+      updatedAt
     }
   }
 `;
@@ -358,6 +406,10 @@ const LOGOUT_SESSION_MUTATION = /* GraphQL */ `
         email
         phone
         displayName
+        avatarUrl
+        tiktokUserId
+        tiktokUsername
+        tiktokScopes
         roles
         permissions
         status
@@ -572,41 +624,53 @@ export class TrendPotGraphQLClient {
     return result.data;
   }
 
-  async requestEmailOtp(
-    input: RequestEmailOtpInput,
+  async startTikTokLogin(
+    input?: StartTikTokLoginInput,
     options: GraphQLOperationOptions = {}
-  ): Promise<EmailOtpChallenge> {
+  ): Promise<TikTokLoginIntent> {
+    const variables = input ? { input } : {};
     const result = await this.performGraphQLRequest({
-      query: REQUEST_EMAIL_OTP_MUTATION,
-      variables: { input },
-      parser: (payload) => requestEmailOtpDataSchema.parse(payload).requestEmailOtp,
+      query: START_TIKTOK_LOGIN_MUTATION,
+      variables,
+      parser: (payload) => startTikTokLoginDataSchema.parse(payload).startTikTokLogin,
       init: options.init
     });
 
     return result.data;
   }
 
-  async verifyEmailOtp(
-    input: VerifyEmailOtpInput,
+  async completeTikTokLogin(
+    input: CompleteTikTokLoginInput,
     options: GraphQLOperationOptions & { includeResponse: true }
   ): Promise<GraphQLExecutionResult<Viewer>>;
 
-  async verifyEmailOtp(
-    input: VerifyEmailOtpInput,
+  async completeTikTokLogin(
+    input: CompleteTikTokLoginInput,
     options?: GraphQLOperationOptions
   ): Promise<Viewer>;
 
-  async verifyEmailOtp(input: VerifyEmailOtpInput, options: GraphQLOperationOptions = {}) {
+  async completeTikTokLogin(input: CompleteTikTokLoginInput, options: GraphQLOperationOptions = {}) {
     const result = await this.performGraphQLRequest({
-      query: VERIFY_EMAIL_OTP_MUTATION,
+      query: COMPLETE_TIKTOK_LOGIN_MUTATION,
       variables: { input },
-      parser: (payload) => verifyEmailOtpDataSchema.parse(payload).verifyEmailOtp,
+      parser: (payload) => completeTikTokLoginDataSchema.parse(payload).completeTikTokLogin,
       init: options.init
     });
 
     if (options.includeResponse) {
       return result;
     }
+
+    return result.data;
+  }
+
+  async updateViewerProfile(input: UpdateViewerProfileInput, options: GraphQLOperationOptions = {}): Promise<User> {
+    const result = await this.performGraphQLRequest({
+      query: UPDATE_VIEWER_PROFILE_MUTATION,
+      variables: { input },
+      parser: (payload) => updateViewerProfileDataSchema.parse(payload).updateViewerProfile,
+      init: options.init
+    });
 
     return result.data;
   }
@@ -747,19 +811,27 @@ export class TrendPotGraphQLClient {
       parsedPayload = await response.json();
     } catch (error) {
       throw new GraphQLRequestError([
-        `Failed to parse GraphQL response: ${error instanceof Error ? error.message : String(error)}`
+        {
+          message: `Failed to parse GraphQL response: ${error instanceof Error ? error.message : String(error)}`
+        }
       ]);
     }
 
     const parsed = graphQLResponseSchema.parse(parsedPayload);
 
     if (parsed.errors && parsed.errors.length > 0) {
-      const messages = parsed.errors.map((error) => error.message);
-      throw new GraphQLRequestError(messages);
+      const graphQLErrors = parsed.errors.map((error) => ({
+        message: error.message,
+        path: error.path,
+        extensions: error.extensions ?? {}
+      }));
+      throw new GraphQLRequestError(graphQLErrors);
     }
 
     if (typeof parsed.data === "undefined") {
-      throw new GraphQLRequestError(["GraphQL response did not include a data payload."]);
+      throw new GraphQLRequestError([
+        { message: "GraphQL response did not include a data payload." }
+      ]);
     }
 
     const data = parser(parsed.data);

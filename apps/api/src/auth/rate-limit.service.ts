@@ -1,30 +1,41 @@
 import { Injectable } from "@nestjs/common";
 import type { RateLimitOptions } from "./auth.decorators";
-
-interface RateLimitBucket {
-  count: number;
-  resetAt: number;
-}
+import { RedisService } from "../redis/redis.service";
 
 @Injectable()
 export class RateLimitService {
-  private readonly buckets = new Map<string, RateLimitBucket>();
+  constructor(private readonly redisService: RedisService) {}
 
-  consume(key: string, options: RateLimitOptions): { allowed: boolean; retryAt: number } {
+  async consume(key: string, options: RateLimitOptions): Promise<{ allowed: boolean; retryAt: number }> {
+    const redisKey = `ratelimit:${key}`;
+    const client = this.redisService.getClient();
+
     const now = Date.now();
-    const existing = this.buckets.get(key);
+    const ttlMs = options.windowMs;
 
-    if (!existing || existing.resetAt <= now) {
-      this.buckets.set(key, { count: 1, resetAt: now + options.windowMs });
-      return { allowed: true, retryAt: now + options.windowMs };
+    const pipeline = client.multi();
+    pipeline.incr(redisKey);
+    pipeline.pexpire(redisKey, ttlMs, "NX");
+    pipeline.pttl(redisKey);
+
+    const results = await pipeline.exec();
+
+    const [, countResult] = results?.[0] ?? [];
+    const [, ttlResult] = results?.[2] ?? [];
+
+    const count = Number(countResult ?? 0);
+    let ttl = Number(ttlResult ?? ttlMs);
+    if (ttl <= 0) {
+      await client.pexpire(redisKey, ttlMs);
+      ttl = ttlMs;
     }
 
-    if (existing.count >= options.max) {
-      return { allowed: false, retryAt: existing.resetAt };
+    const retryAt = now + ttl;
+
+    if (count > options.max) {
+      return { allowed: false, retryAt };
     }
 
-    existing.count += 1;
-    this.buckets.set(key, existing);
-    return { allowed: true, retryAt: existing.resetAt };
+    return { allowed: true, retryAt };
   }
 }

@@ -23,6 +23,7 @@
     "@nestjs/platform-fastify": "10.3.7",
     "fastify": "4.28.1",
     "@trendpot/types": "workspace:*",
+    "ioredis": "5.3.2",
     "graphql": "16.8.1",
     "mercurius": "14.0.0",
     "mongoose": "8.3.2",

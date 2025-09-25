@@ -3,61 +3,63 @@ import { BadRequestException } from "@nestjs/common";
 import { AllowAnonymous, RateLimit, Roles } from "../auth/auth.decorators";
 import type { GraphQLContext } from "../observability/graphql-context";
 import { PlatformAuthService } from "./platform-auth.service";
-import { EmailOtpChallengeModel } from "../models/email-otp-challenge.model";
-import { VerifyEmailOtpInputModel } from "../models/verify-email-otp.input";
 import { ViewerModel } from "../models/viewer.model";
 import { ViewerSessionModel } from "../models/viewer-session.model";
-import { RequestEmailOtpInputModel } from "../models/request-email-otp.input";
+import { StartTikTokLoginInputModel } from "../models/start-tiktok-login.input";
+import { CompleteTikTokLoginInputModel } from "../models/complete-tiktok-login.input";
+import { TikTokLoginIntentModel } from "../models/tiktok-login-intent.model";
+import { ViewerUserModel } from "../models/viewer-user.model";
+import { UpdateViewerProfileInputModel } from "../models/update-viewer-profile.input";
 
 @Resolver()
 export class PlatformAuthResolver {
   constructor(private readonly platformAuthService: PlatformAuthService) {}
 
   @AllowAnonymous()
-  @RateLimit({ windowMs: 60_000, max: 5 })
-  @Mutation(() => EmailOtpChallengeModel, { name: "requestEmailOtp" })
-  async requestEmailOtp(
-    @Args("input", { type: () => RequestEmailOtpInputModel }) input: RequestEmailOtpInputModel,
+  @RateLimit({ windowMs: 60_000, max: 10 })
+  @Mutation(() => TikTokLoginIntentModel, { name: "startTikTokLogin" })
+  async startTikTokLogin(
+    @Args("input", { type: () => StartTikTokLoginInputModel, nullable: true }) input: StartTikTokLoginInputModel | null,
     @Context() context: GraphQLContext
   ) {
-    const { email, displayName, deviceLabel } = input;
-    const result = await this.platformAuthService.issueEmailOtp({
-      email,
-      displayName,
-      deviceLabel,
+    const result = await this.platformAuthService.createTikTokLoginIntent({
+      scopes: input?.scopes,
+      returnPath: input?.returnPath,
+      redirectUri: input?.redirectUri,
+      deviceLabel: input?.deviceLabel,
       logger: context.logger,
       requestId: context.requestId,
       ipAddress: context.request.ip,
       userAgent: context.request.headers["user-agent"],
     });
 
-    const deliveryHint = email.replace(/(^.).+(@.*$)/, (_, first: string, domain: string) => `${first}***${domain}`);
-
-    const model = new EmailOtpChallengeModel();
-    model.token = result.token;
-    model.expiresAt = result.expiresAt;
-    model.deliveryHint = deliveryHint;
+    const model = new TikTokLoginIntentModel();
+    model.state = result.state;
+    model.clientKey = result.clientKey;
+    model.redirectUri = result.redirectUri;
+    model.scopes = result.scopes;
+    model.returnPath = result.returnPath ?? null;
     return model;
   }
 
   @AllowAnonymous()
   @RateLimit({ windowMs: 60_000, max: 10 })
-  @Mutation(() => ViewerModel, { name: "verifyEmailOtp" })
-  async verifyEmailOtp(
-    @Args("input", { type: () => VerifyEmailOtpInputModel }) input: VerifyEmailOtpInputModel,
+  @Mutation(() => ViewerModel, { name: "completeTikTokLogin" })
+  async completeTikTokLogin(
+    @Args("input", { type: () => CompleteTikTokLoginInputModel }) input: CompleteTikTokLoginInputModel,
     @Context() context: GraphQLContext
   ) {
-    const verification = await this.platformAuthService.verifyEmailOtp({
-      ...input,
+    const result = await this.platformAuthService.completeTikTokLogin({
+      code: input.code,
+      state: input.state,
       logger: context.logger,
       requestId: context.requestId,
       ipAddress: context.request.ip,
       userAgent: context.request.headers["user-agent"],
-      deviceLabel: input.deviceLabel,
       reply: context.reply
     });
 
-    return ViewerModel.fromContext({ user: verification.user, session: verification.session });
+    return ViewerModel.fromContext({ user: result.user, session: result.session });
   }
 
   @Roles("fan", "creator", "operator", "admin")
@@ -126,5 +128,29 @@ export class PlatformAuthResolver {
     }
 
     return ViewerSessionModel.fromSession(session);
+  }
+
+  @Roles("fan", "creator", "operator", "admin")
+  @Mutation(() => ViewerUserModel, { name: "updateViewerProfile" })
+  async updateViewerProfile(
+    @Args("input", { type: () => UpdateViewerProfileInputModel }) input: UpdateViewerProfileInputModel,
+    @Context() context: GraphQLContext
+  ) {
+    if (!context.user) {
+      throw new BadRequestException("Viewer is not authenticated");
+    }
+
+    const user = await this.platformAuthService.updateViewerProfile({
+      userId: context.user.id,
+      actorRoles: context.user.roles,
+      displayName: input.displayName,
+      phone: input.phone,
+      logger: context.logger,
+      requestId: context.requestId,
+      ipAddress: context.request.ip,
+      userAgent: context.request.headers["user-agent"]
+    });
+
+    return ViewerUserModel.fromUser(user);
   }
 }

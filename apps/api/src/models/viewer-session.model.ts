@@ -9,6 +9,9 @@ export class ViewerSessionMetadataModel {
 
   @Field({ nullable: true })
   declare riskLevel?: string | null;
+
+  @Field({ nullable: true })
+  declare tiktokOpenId?: string | null;
 }
 
 
@@ -60,11 +63,13 @@ export class ViewerSessionModel {
     model.status = session.status;
     model.deviceLabel = session.metadata?.device ?? null;
     model.riskLevel = session.metadata?.riskLevel ?? null;
+    model.tiktokOpenId = (session.metadata as { tiktokOpenId?: string } | undefined)?.tiktokOpenId ?? null;
     model.refreshTokenHash = session.refreshTokenHash;
     if (session.metadata) {
       const metadata = new ViewerSessionMetadataModel();
       metadata.device = session.metadata.device ?? null;
       metadata.riskLevel = session.metadata.riskLevel ?? null;
+      metadata.tiktokOpenId = (session.metadata as { tiktokOpenId?: string }).tiktokOpenId ?? null;
       model.metadata = metadata;
     } else {
       model.metadata = null;

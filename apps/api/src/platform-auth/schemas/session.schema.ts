@@ -44,13 +44,15 @@ export class SessionEntity {
         type: String,
         enum: ["low", "medium", "high"],
         default: "low"
-      }
+      },
+      tiktokOpenId: String
     },
     default: { riskLevel: "low" }
   })
   declare metadata?: {
     device?: string;
     riskLevel?: "low" | "medium" | "high";
+    tiktokOpenId?: string;
   };
 }
 

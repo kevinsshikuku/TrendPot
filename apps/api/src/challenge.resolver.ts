@@ -1,6 +1,6 @@
 import { Args, Int, Mutation, Query, Resolver } from "@nestjs/graphql";
 import type { ListChallengesParams } from "@trendpot/types";
-import { AllowAnonymous, RateLimit, Roles } from "./auth/auth.decorators";
+import { AllowAnonymous, RateLimit, Roles, RequireProfileFields } from "./auth/auth.decorators";
 import { AppService } from "./app.service";
 import { ChallengeListModel } from "./models/challenge-list.model";
 import { ChallengeModel } from "./models/challenge.model";
@@ -65,6 +65,7 @@ export class ChallengeResolver {
   }
 
   @Roles("admin", "operator")
+  @RequireProfileFields("displayName", "phone")
   @RateLimit({ windowMs: 60_000, max: 10 })
   @Mutation(() => ChallengeModel, { name: "createChallenge" })
   async createChallenge(@Args("input") input: CreateChallengeInputModel) {
@@ -72,6 +73,7 @@ export class ChallengeResolver {
   }
 
   @Roles("admin", "operator")
+  @RequireProfileFields("displayName", "phone")
   @RateLimit({ windowMs: 60_000, max: 15 })
   @Mutation(() => ChallengeModel, { name: "updateChallenge" })
   async updateChallenge(@Args("input") input: UpdateChallengeInputModel) {
@@ -79,6 +81,7 @@ export class ChallengeResolver {
   }
 
   @Roles("admin", "operator")
+  @RequireProfileFields("displayName", "phone")
   @RateLimit({ windowMs: 60_000, max: 10 })
   @Mutation(() => ChallengeModel, { name: "archiveChallenge" })
   async archiveChallenge(@Args("input") input: ArchiveChallengeInputModel) {
