@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, access } from "node:fs/promises";
 import { dirname, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -14,7 +14,14 @@ const shimMap = new Map([
   ["@nestjs/platform-fastify", new URL("@nestjs/platform-fastify/index.js", shimBase).href],
   ["@fastify/cors", new URL("@fastify/cors/index.js", shimBase).href],
   ["mongoose", new URL("mongoose/index.js", shimBase).href],
-  ["@trendpot/types", new URL("@trendpot/types/index.js", shimBase).href]
+  ["@trendpot/types", new URL("@trendpot/types/index.js", shimBase).href],
+  ["@trendpot/utils", new URL("@trendpot/utils/index.js", shimBase).href],
+  ["pino", new URL("pino/index.js", shimBase).href],
+  ["react", new URL("react/index.js", shimBase).href],
+  ["react/jsx-runtime", new URL("react/jsx-runtime/index.js", shimBase).href],
+  ["react-dom/server", new URL("react-dom/server/index.js", shimBase).href],
+  ["@tanstack/react-query", new URL("@tanstack/react-query/index.js", shimBase).href],
+  ["@trendpot/ui", new URL("@trendpot/ui/index.js", shimBase).href]
 ]);
 
 /**
@@ -25,9 +32,15 @@ export async function resolve(specifier, context, defaultResolve) {
   if (specifier.startsWith("./") || specifier.startsWith("../")) {
     const parentUrl = context.parentURL ?? "file://";
     const resolved = new URL(specifier, parentUrl);
-    if (!resolved.pathname.endsWith(".ts") && !resolved.pathname.endsWith(".js")) {
-      const tsUrl = new URL(`${specifier}.ts`, parentUrl);
-      return { url: tsUrl.href, shortCircuit: true };
+    if (!resolved.pathname.endsWith(".ts") && !resolved.pathname.endsWith(".tsx") && !resolved.pathname.endsWith(".js")) {
+      const tsxUrl = new URL(`${specifier}.tsx`, parentUrl);
+      try {
+        await access(tsxUrl);
+        return { url: tsxUrl.href, shortCircuit: true };
+      } catch {
+        const tsUrl = new URL(`${specifier}.ts`, parentUrl);
+        return { url: tsUrl.href, shortCircuit: true };
+      }
     }
   }
 

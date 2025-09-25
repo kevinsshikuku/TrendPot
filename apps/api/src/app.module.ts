@@ -12,10 +12,14 @@ import { ChallengeResolver } from "./challenge.resolver";
 import { HealthResolver } from "./health.resolver";
 import { AuthResolver } from "./models/auth.resolver";
 import { ChallengeEntity, ChallengeSchema } from "./models/challenge.schema";
+import { SubmissionEntity, SubmissionSchema } from "./models/submission.schema";
+import { TikTokAccountEntity, TikTokAccountSchema } from "./models/tiktok-account.schema";
+import { VideoEntity, VideoSchema } from "./models/video.schema";
 import { buildGraphQLContext } from "./observability/graphql-context";
 import { structuredErrorFormatter } from "./observability/error-formatter";
 import { PlatformAuthModule } from "./platform-auth/platform-auth.module";
 import { PlatformAuthService } from "./platform-auth/platform-auth.service";
+import { TikTokModule } from "./tiktok/tiktok.module";
 
 @Module({
   imports: [
@@ -32,8 +36,14 @@ import { PlatformAuthService } from "./platform-auth/platform-auth.service";
       })
     }),
     MongooseModule.forRoot(process.env.MONGODB_URI ?? "mongodb://localhost:27017/trendpot"),
-    MongooseModule.forFeature([{ name: ChallengeEntity.name, schema: ChallengeSchema }]),
-    PlatformAuthModule
+    MongooseModule.forFeature([
+      { name: ChallengeEntity.name, schema: ChallengeSchema },
+      { name: TikTokAccountEntity.name, schema: TikTokAccountSchema },
+      { name: VideoEntity.name, schema: VideoSchema },
+      { name: SubmissionEntity.name, schema: SubmissionSchema }
+    ]),
+    PlatformAuthModule,
+    TikTokModule
   ],
   providers: [
     AppService,

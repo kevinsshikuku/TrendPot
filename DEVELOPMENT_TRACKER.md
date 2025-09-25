@@ -23,9 +23,9 @@
 - **Implementation Notes**: TikTok OAuth + session issuance now ship with Redis-backed state and rate limiting; next milestones cover donations, submissions, payouts, and richer audit/reporting domains.
 
 ### Worker (BullMQ)
-- **Status**: ☐
-- **Snapshot**: Leaderboard queue returns mocked payloads.
-- **Implementation Notes**: Producers and TikTok/donation integrations need to be wired before milestones can progress.
+- **Status**: ▣
+- **Snapshot**: TikTok ingestion and metrics refresh queues hydrate Mongo/Redis with sanitized embeds, and integration tests cover token refresh, Display API batching, and cache notifications alongside the legacy leaderboard stub.
+- **Implementation Notes**: Finalize donation/leaderboard scoring producers and tune BullMQ concurrency before launch.
 
 ### Shared Types & Contracts
 - **Status**: ▣
@@ -39,13 +39,13 @@
 
 ### Security Measures
 - **Status**: ▣
-- **Snapshot**: Fastify now ships with Helmet, an env-driven CORS allowlist, TikTok-only login/session cookies, and Redis-backed rate limits on sensitive resolvers.
-- **Implementation Notes**: Document credential rotation/KMS flows, expand anomaly detection, and wire webhook signing before enabling donations or payouts.
+- **Snapshot**: Fastify now ships with Helmet, an env-driven CORS allowlist, TikTok-only login/session cookies, Redis-backed rate limits, and documented TikTok token lifecycle + KMS usage with sanitizer tests guarding embed HTML.
+- **Implementation Notes**: Expand anomaly detection and wire webhook signing before enabling donations or payouts.
 
 ### Observability & Testing
-- **Status**: ☐
-- **Snapshot**: No automated test scripts, tracing, or metrics wiring exist today.
-- **Implementation Notes**: Logging is minimal and inconsistent, leaving future debugging at risk.
+- **Status**: ▣
+- **Snapshot**: Node test harnesses now cover TikTok sanitizer red-team cases, OAuth-to-ingestion handoffs, metrics refresh workers, and challenge rendering while tracing/metrics remain on the backlog.
+- **Implementation Notes**: Logging is still minimal; wire tracing/metrics exporters next.
 
 ### Infrastructure & Ops
 - **Status**: ☐
@@ -54,8 +54,8 @@
 
 ### Documentation
 - **Status**: ▣
-- **Snapshot**: README and APPLICATION_FLOW outline intent.
-- **Implementation Notes**: This tracker now consolidates state and milestones for a single glance across teams.
+- **Snapshot**: README, APPLICATION_FLOW, Display API alignment notes, and the new TikTok ingestion runbook capture setup, security, and incident guidance.
+- **Implementation Notes**: Keep docs synced with rollout plans and compliance updates.
 
 ### Frontend Snapshot
 - **Routing & Data**: Admin routes deliver create/edit forms that hydrate React Query caches, process GraphQL validation errors, and surface challenge analytics with server-driven pagination and filters. Public routes (`/`, `/challenges`, `/c/[id]`) keep placeholder KPIs but allow guest browsing, while `/login` and `/signup` now funnel into the TikTok OAuth bridge via Next API routes.
@@ -70,9 +70,9 @@
 - **Security**: Fastify boots with Helmet, CORS allowlists, and Redis-backed rate limits, yet secret rotation guidance, webhook signature verification, and anomaly detection still need to be defined.
 
 ### Worker & Background Jobs Snapshot
-- BullMQ worker registers a `leaderboard` queue that returns static demo data validated by Zod.
-- No producers, schedulers, or integrations with Mongo/GraphQL are wired; retries rely on shared helper defaults.
-- Queue-based notifications, TikTok refresh jobs, and donation reconciliation are not implemented.
+- BullMQ worker now processes TikTok initial sync and metrics refresh jobs that hydrate Mongo and publish Redis cache updates alongside the legacy leaderboard stub.
+- Queue-based notifications for donations still need to be implemented, and leaderboard scoring remains mocked until donation flows land.
+- Retry/backoff controls and metrics instrumentation exist for TikTok pipelines but not yet for donations or payouts.
 
 ### Shared Types & Contracts Snapshot
 - `@trendpot/types` contains Zod schemas for challenges with lifecycle status enums, optimistic locking inputs, and a minimal leaderboard payload.
@@ -86,12 +86,12 @@
 
 ### Security & Compliance Snapshot
 - TikTok OAuth + session cookies now gate admin routes, with role checks preventing unauthorized challenge mutations.
-- Redis-backed rate limiting and CORS allowlists ship with the API, but anomaly detection and abuse monitoring still need coverage.
-- Webhook signature verification, encryption-at-rest guidance, and key management for TikTok/M-Pesa tokens remain to be implemented.
+- Redis-backed rate limiting and CORS allowlists ship with the API, and TikTok token lifecycle/KMS usage plus sanitizer integration tests are documented for compliance review.
+- Webhook signature verification, anomaly detection, and M-Pesa credential guidance remain to be implemented.
 
 ### Observability & Testing Snapshot
-- No unit, integration, or end-to-end test suites are configured across `web`, `api`, or `worker`.
-- Logging omits structured metadata (request IDs, user context) and there is no centralized telemetry pipeline (OTel, Sentry, PostHog) despite project requirements.
+- Node-based unit/integration suites now exercise TikTok sanitizer edge cases, ingestion queue handoffs, worker refresh jobs, and challenge rendering, though tracing/metrics remain outstanding.
+- Logging still omits structured metadata (request IDs, user context) and there is no centralized telemetry pipeline (OTel, Sentry, PostHog) despite project requirements.
 - Schema checks, linting gates, and CI workflows need to be defined before feature expansion.
 
 ### Infrastructure & Ops Snapshot
@@ -100,9 +100,9 @@
 - No runbooks for incident response, staging/prod promotion, or backup validation are recorded.
 
 ### Documentation Snapshot
-- README sets non-negotiables (PWA installability, TikTok Display API, M-Pesa STK Push, security controls) but many remain unmet.
+- README sets non-negotiables (PWA installability, TikTok Display API, M-Pesa STK Push, security controls) and now links to ingestion security/QA expectations.
 - APPLICATION_FLOW.md describes existing routes and callouts for missing ones (e.g., `/me`), which should be referenced as features land.
-- This tracker now consolidates state, milestones, and future checkpoints for quick glance status across teams.
+- Display alignment notes and the TikTok ingestion runbook provide provisioning, privacy, and incident response guidance while this tracker consolidates cross-team status.
 
 ### Key Gaps & Risks (Quick Reference)
 - **Security**: Webhook signing, credential rotation guidance, and anomaly detection still missing ahead of donations/payouts.
@@ -143,13 +143,13 @@
 
 ## 4. TikTok Content Ingestion & Presentation
 - ☐ **Implement TikTok Display API OAuth flow, token storage (encrypted), and ingestion workers.** _(Owner: Backend)_
-  - Notes:
+  - Notes: 2025-10-15 – AI – Captured Display API scope/consent decisions plus env + KMS provisioning requirements in `docs/design/tiktok-display-alignment.md` to unblock backend/worker implementation.; 2025-10-16 – AI – Added integration tests validating OAuth-to-ingestion queue handoffs and documented token lifecycle + privacy controls.
 - ☐ **Model submissions/videos in shared types + Mongo with sanitization rules.** _(Owner: Backend)_
-  - Notes:
+  - Notes: 2025-10-16 – AI – Added sanitizer red-team tests covering malicious embed payloads to enforce shared HTML allowlists.
 - ☐ **Surface embedded TikTok content within challenge detail pages with responsive layouts.** _(Owner: Frontend)_
-  - Notes:
+  - Notes: 2025-10-16 – AI – Added challenge detail integration test to verify responsive hero + secondary embeds render sanitized HTML and metrics.
 - ☐ **Schedule background refresh jobs pushing updates to queues and caches.** _(Owner: Worker)_
-  - Notes:
+  - Notes: 2025-10-16 – AI – Added worker metrics refresh integration test covering Display API batching, Mongo updates, and Redis cache notifications.
 
 ## 5. Donation & Payments Flow (M-Pesa)
 - ☐ **Integrate Daraja STK Push initiation with idempotent keys and encrypted credentials.** _(Owner: Backend)_

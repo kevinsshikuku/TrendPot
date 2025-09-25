@@ -473,7 +473,8 @@ const toChallenge = (challenge: ChallengeDocumentShape): Challenge => ({
   status: (challenge.status as ChallengeStatus) ?? ChallengeStatus.Draft,
   createdAt: challenge.createdAt.toISOString(),
   updatedAt: challenge.updatedAt.toISOString(),
-  version: challenge.__v ?? 0
+  version: challenge.__v ?? 0,
+  submissions: null
 });
 
 const allowedStatuses = new Set<ChallengeStatus>([

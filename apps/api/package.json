@@ -21,6 +21,7 @@
     "@nestjs/mongoose": "10.0.2",
     "@nestjs/mercurius": "12.0.1",
     "@nestjs/platform-fastify": "10.3.7",
+    "bullmq": "4.11.4",
     "fastify": "4.28.1",
     "@trendpot/types": "workspace:*",
     "ioredis": "5.3.2",

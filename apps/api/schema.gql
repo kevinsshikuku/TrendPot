@@ -17,6 +17,13 @@ enum UserStatus {
   PENDING_VERIFICATION
 }
 
+enum SubmissionState {
+  PENDING
+  APPROVED
+  REJECTED
+  REMOVED
+}
+
 type ChallengeSummary {
   id: String!
   title: String!
@@ -71,6 +78,94 @@ type Challenge {
   version: Int!
   description: String!
   createdAt: DateTime!
+  submissions: SubmissionConnection
+}
+
+type TikTokAccount {
+  id: String!
+  username: String!
+  displayName: String
+  avatarUrl: String
+  scopes: [String!]!
+  accessTokenExpiresAt: DateTime!
+  refreshTokenExpiresAt: DateTime!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type TikTokEmbed {
+  provider: String!
+  html: String!
+  scriptUrl: String!
+  width: Int
+  height: Int
+  thumbnailUrl: String
+  authorName: String
+  authorUrl: String
+}
+
+type VideoMetrics {
+  likeCount: Int!
+  commentCount: Int!
+  shareCount: Int!
+  viewCount: Int!
+}
+
+type Video {
+  id: String!
+  tiktokVideoId: String!
+  ownerAccountId: String!
+  shareUrl: String!
+  caption: String
+  postedAt: DateTime
+  embed: TikTokEmbed!
+  metrics: VideoMetrics!
+  lastRefreshedAt: DateTime!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  owner: TikTokAccount!
+}
+
+type VideoEdge {
+  cursor: String!
+  node: Video!
+}
+
+type VideoPageInfo {
+  endCursor: String
+  hasNextPage: Boolean!
+}
+
+type VideoConnection {
+  edges: [VideoEdge!]!
+  pageInfo: VideoPageInfo!
+}
+
+type Submission {
+  id: String!
+  challengeId: String!
+  creatorUserId: String!
+  videoId: String!
+  state: SubmissionState!
+  rejectionReason: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  video: Video!
+}
+
+type SubmissionEdge {
+  cursor: String!
+  node: Submission!
+}
+
+type SubmissionPageInfo {
+  endCursor: String
+  hasNextPage: Boolean!
+}
+
+type SubmissionConnection {
+  edges: [SubmissionEdge!]!
+  pageInfo: SubmissionPageInfo!
 }
 
 type Health {
@@ -180,11 +275,17 @@ input UpdateViewerProfileInput {
   phone: String
 }
 
+input SubmitToChallengeInput {
+  challengeId: String!
+  tiktokVideoId: String!
+}
+
 type Query {
   featuredChallenges(status: String, limit: Int): [ChallengeSummary!]!
   challenges(status: String, limit: Int): [ChallengeSummary!]!
   challengeAdminList(input: ChallengeListInput): ChallengeList!
   challenge(id: String!): Challenge
+  creatorVideos(first: Int, after: String): VideoConnection!
   health: Health!
   viewer: Viewer!
   viewerSessions: [ViewerSession!]!
@@ -199,6 +300,7 @@ type Mutation {
   updateViewerProfile(input: UpdateViewerProfileInput!): ViewerUser!
   logoutSession(sessionId: String!): Viewer!
   revokeSession(sessionId: String!): ViewerSession!
+  submitToChallenge(input: SubmitToChallengeInput!): Submission!
 }
 
 scalar DateTime

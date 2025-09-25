@@ -11,6 +11,9 @@ const SchemaFactory = {
             return undefined;
           }
         };
+      },
+      index() {
+        return this;
       }
     };
   }
