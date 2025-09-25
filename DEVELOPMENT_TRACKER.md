@@ -113,8 +113,8 @@
 
 ---
 ## 1. Foundation Hardening & Data Seeding
-- ☐ **Author seed scripts for Mongo fixtures (challenges, sample users, submissions) and document runbooks.** _(Owner: Backend)_
-  - Notes: (add `YYYY-MM-DD – Initials – Summary or PR link` when complete)
+- ☑ **Author seed scripts for Mongo fixtures (challenges, sample users, submissions) and document runbooks.** _(Owner: Backend)_
+  - Notes: 2024-06-06 – AI – Added Mongo seed script and seeding runbook.
 - ☐ **Establish unit/integration test harnesses across apps (`web`, `api`, `worker`) with CI pipelines wired.** _(Owner: DX)_
   - Notes:
 - ☐ **Implement structured logging (request IDs, correlation IDs) and baseline error envelopes across API + worker.** _(Owner: Platform)_
