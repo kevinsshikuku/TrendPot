@@ -13,10 +13,14 @@
     "@fastify/cors": "9.0.1",
     "@nestjs/common": "10.3.7",
     "@nestjs/core": "10.3.7",
+    "@nestjs/graphql": "12.0.4",
+    "@nestjs/mercurius": "12.0.1",
     "@nestjs/platform-fastify": "10.3.7",
+    "@trendpot/types": "workspace:*",
+    "graphql": "16.8.1",
+    "mercurius": "14.0.0",
     "reflect-metadata": "0.1.14",
-    "rxjs": "7.8.1",
-    "@trendpot/types": "workspace:*"
+    "rxjs": "7.8.1"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "7.5.0",

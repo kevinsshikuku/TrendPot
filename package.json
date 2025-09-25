@@ -7,7 +7,8 @@
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "test": "turbo run test",
-    "format": "turbo run format --parallel"
+    "format": "turbo run format --parallel",
+    "graphql:gen": "pnpm --filter @trendpot/types run build"
   },
   "devDependencies": {
     "turbo": "^1.11.3"

@@ -1,6 +1,6 @@
-import { TrendPotApiClient } from "@trendpot/types";
+import { TrendPotGraphQLClient } from "@trendpot/types";
 
 const fallbackBaseUrl = "http://localhost:4000";
 const resolvedBaseUrl = process.env.NEXT_PUBLIC_API_URL ?? process.env.API_BASE_URL ?? fallbackBaseUrl;
 
-export const apiClient = new TrendPotApiClient({ baseUrl: resolvedBaseUrl });
+export const apiClient = new TrendPotGraphQLClient({ baseUrl: resolvedBaseUrl });

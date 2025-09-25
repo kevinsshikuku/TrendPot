@@ -1,3 +1,3 @@
 export * from "./challenges";
 export * from "./leaderboard";
-export * from "./client";
+export * from "./graphql-client";

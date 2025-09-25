@@ -3,9 +3,9 @@
 
 1. **Respect team boundaries**
 
-   * **Frontend owns:** `apps/web` + `packages/ui`. Only call the API via the generated REST client in `packages/types`. **No cross‑imports** from API.
+   * **Frontend owns:** `apps/web` + `packages/ui`. Only call the API via the generated GraphQL client in `packages/types`. **No cross‑imports** from API.
    * **Backend owns:** `apps/api` (NestJS), `apps/worker` (BullMQ), webhooks, queues.
-2. **Contract‑first:** Any API change updates OpenAPI 3.1 → CI enforces **openapi‑diff** (no breaking changes on PR).
+2. **Contract‑first:** Any API change updates the GraphQL schema SDL → CI enforces **schema diff + persisted query checks** (no breaking changes on PR).
 3. **Security & Compliance:**
 
    * TikTok: **Display API** + **oEmbed** only, with creator consent. No scraping or unofficial APIs.
@@ -14,7 +14,7 @@
 4. **Data:** MongoDB Atlas is the primary store (multi‑region, sharded per plan). Use **ObjectId** FKs. Prefer referencing over deep embedding. Use **keyset pagination**.
 5. **Money:** Store amounts as **integer cents** (KES×100). No floats. See §15.1–15.8.
 6. **Observability:** Instrument traces (OTel), log with request IDs, capture metrics; Sentry for errors; PostHog for product events.
-7. **Definition of Done (DoD):** All checklists in this doc pass; tests green; OpenAPI/types regenerated; PWA passes installability; CI green; dashboards/alerts updated if behavior changes.
+7. **Definition of Done (DoD):** All checklists in this doc pass; tests green; GraphQL schema + generated artifacts updated; PWA passes installability; CI green; dashboards/alerts updated if behavior changes.
 
 ---
 
@@ -28,7 +28,7 @@
     worker/             # BullMQ consumers & schedulers
   packages/
     ui/                 # Shared React UI library
-    types/              # OpenAPI‑generated TS types + Zod schemas
+    types/              # GraphQL documents, TS types + Zod schemas
     config/             # ESLint, tsconfig, tailwind preset
     utils/              # Shared utilities (dates, money, fetch)
   infra/
@@ -37,7 +37,7 @@
   .github/workflows/    # CI pipelines
 ```
 
-**Rules:** FE uses only REST via `packages/types` client; all UI primitives live in `packages/ui`; flags/constants in `packages/utils`.
+**Rules:** FE uses only GraphQL via `packages/types` client; all UI primitives live in `packages/ui`; flags/constants in `packages/utils`.
 
 ---
 
@@ -55,8 +55,8 @@ docker compose up -d
 # 2.3 Seed & ensure indexes (idempotent scripts)
 pnpm -w run db:init     # creates indexes, validators
 
-# 2.4 Generate types from OpenAPI (first time and whenever API changes)
-pnpm -w run types:gen
+# 2.4 Generate GraphQL artifacts (first time and whenever the schema changes)
+pnpm -w run graphql:gen
 
 # 2.5 Dev everything (concurrently)
 pnpm -w run dev         # runs web/api/worker together (see package.json)
@@ -163,26 +163,36 @@ Use Mongoose 8 schemas + MongoDB **JSON Schema validators**. Default IDs are **O
 
 * **TikTok Display API**: Server‑side OAuth (PKCE), encrypted tokens in `tiktok_accounts`. Endpoints to fetch creator videos/metrics during submission and on refresh cycles.
 * **TikTok oEmbed**: Backend proxy `GET /embed?url=...` → sanitize HTML → FE renders `<TikTokEmbed/>`.
-* **M‑Pesa Daraja (STK Push)**: `POST /donations/stkpush` initiates; webhook `POST /webhooks/mpesa/stkpush` verifies + idempotently updates `donations`.
+* **M‑Pesa Daraja (STK Push)**: `requestStkPush` GraphQL mutation initiates; webhook `POST /webhooks/mpesa/stkpush` verifies + idempotently updates `donations`.
 
 ---
 
-## 5) API (REST, OpenAPI 3.1)
+## 5) API (GraphQL Schema)
 
-**Contract:** Generated via NestJS decorators + Zod DTOs. FE types generated with `openapi-typescript` into `packages/types`.
+**Contract:** Code-first schema via Nest GraphQL decorators + Zod DTOs. SDL is checked into git (`apps/api/schema.gql`).
+`packages/types` publishes typed documents + Zod validation for each approved operation. Run `pnpm -w run graphql:gen` whenever
+schema or documents change.
 
-**Key Paths:**
+**Core Queries:**
 
-* **Auth/Profile:** `GET /me`
-* **TikTok Connect:** `GET /tiktok/oauth/start`, `GET /tiktok/oauth/callback`, `GET /tiktok/videos?mine=true&after=...`
-* **Challenges:** `GET /challenges`, `POST /challenges [admin]`, `GET /challenges/:id`, `PATCH /challenges/:id`, `POST /challenges/:id/publish`
-* **Submissions:** `POST /challenges/:id/submissions`, `POST /submissions/:id/approve|reject`, `GET /challenges/:id/submissions?state=approved&cursor=...`
-* **Leaderboards:** `GET /challenges/:id/leaderboard?limit=100`, `GET /challenges/:id/top3`
-* **Donations:** `POST /donations/stkpush`, `GET /donations/:id`, `GET /creators/:id/donations`
-* **Webhooks:** `POST /webhooks/mpesa/stkpush`
-* **Admin:** `GET /admin/reports`, `POST /admin/submissions/:id/flag`, `GET /admin/audit`
+* `health` → service uptime, used by probes.
+* `me` → profile + linked TikTok account + donation totals.
+* `featuredChallenges(status, limit)` → hero grid feed.
+* `challenge(id)` → challenge detail (includes metrics + leaderboard preview fields).
+* `challengeSubmissions(id, state, after, first)` → moderator + creator lists with keyset pagination.
+* `challengeLeaderboard(id, first, after)` → leaderboard connection.
+* `creatorVideos(after)` → TikTok library for submission flow.
+* `donation(id)` → donation status for polling.
+* `creatorDonations(creatorId, after)` → earnings history.
+* `adminReports`, `adminSummary`, `adminAuditLog`, `adminDonations` → admin dashboards.
 
-**Conventions:** Envelope `{ data, error, meta }`, `x-request-id` on responses; Zod validate inputs; sanitize outputs.
+**Mutations:**
+
+* `startTikTokOAuth`, `completeTikTokOAuth`.
+* `submitToChallenge`, `moderateSubmission`, `upsertChallenge`, `publishChallenge`.
+* `requestStkPush` (M-Pesa), `flagSubmission` (admin), `updateNotificationPrefs`.
+
+**Conventions:** GraphQL errors include `extensions.code` (match `E_*` glossary). Always echo `x-request-id` header; sanitize outputs; inputs validated via Zod before resolver logic.
 
 ---
 
@@ -215,7 +225,7 @@ Queues: `tokenRefresh`, `videoSync`, `leaderboard`, `donationRecon`, `dlqHandler
 
 ## 8) Caching & Performance
 
-* **Redis:** cache `GET /challenges/:id/top3` for 60s; invalidate on leaderboard compute.
+* **Redis:** cache `challengeLeaderboard` top3 slice for 60s; invalidate on leaderboard compute.
 * **HTTP/CDN:** `s-maxage=60, stale-while-revalidate=120` for public reads.
 * **Mongo:** nearest read preference; tuned `maxPoolSize` via load tests.
 * **Pagination:** keyset only (never offsets).
@@ -225,12 +235,12 @@ Queues: `tokenRefresh`, `videoSync`, `leaderboard`, `donationRecon`, `dlqHandler
 ## 9) PWA: Installability, Offline, Push
 
 * **Manifest v3:** `name`, `short_name`, icons, `start_url='/'`, `display='standalone'`, theme colors.
-* **Service Worker (Workbox):**
-
-  * `StaleWhileRevalidate` for app shell
-  * `CacheFirst` for static assets
-  * `NetworkFirst` for JSON (small TTL)
-  * **Background Sync:** queue failed `POST /donations/stkpush` and retry
+  * **Service Worker (Workbox):**
+  
+    * `StaleWhileRevalidate` for app shell
+    * `CacheFirst` for static assets
+    * `NetworkFirst` for JSON (small TTL)
+    * **Background Sync:** queue failed `requestStkPush` mutations and retry
 * **Web Push:**
 
   * VAPID keys (see §2); store user subscriptions under `users.notifications`
@@ -246,25 +256,25 @@ Queues: `tokenRefresh`, `videoSync`, `leaderboard`, `donationRecon`, `dlqHandler
 **Public**
 
 1. `/` Home — Featured live challenges
-   Data: `GET /challenges?status=live&limit=6` → open challenge → `/c/[slug]`
+   Data: `featuredChallenges(status: "live", limit: 6)` query → open challenge → `/c/[slug]`
 2. `/challenges` Explore — Filters + infinite scroll
-   Data: `GET /challenges?cursor=<id>`
+   Data: `challenges(first, after, filters)` query
 3. `/c/[slug]` Challenge Details — Hero, rules, Top 3 (real‑time), full leaderboard
-   Data: `GET /challenges/:id`, `GET /challenges/:id/top3`, `GET /challenges/:id/submissions?state=approved&cursor=<id>`
+   Data: `challenge(id)`, `challengeLeaderboard(id, first)`, `challengeSubmissions(id, state, after)`
    Realtime: subscribe to `leaderboard:update`
 4. `/s/[submissionId]` Submission Detail — TikTok embed + metrics + donation widget
-   Data: `GET /submissions/:id` + oEmbed HTML via API proxy
+   Data: `submission(id)` + oEmbed HTML via API proxy
 
 **Authenticated**
 5\. `/join` Creator flow — connect TikTok if needed → select video → submit to challenge
-Data: `GET /tiktok/videos?mine=true&after=...`
+Data: `creatorVideos(after)` query
 6\. `/connect/tiktok` — OAuth start/callback → `/me`
 7\. `/me` Profile — Submissions, donations, TikTok status
-Data: `GET /me`, `GET /creators/:id/donations`
+Data: `me`, `creatorDonations(creatorId, after)` queries
 8\. `/donate/[submissionId]` Donate — STK Push (phone + amount)
-Action: `POST /donations/stkpush`; Status: poll `GET /donations/:id` or SSE/WS
+Action: `requestStkPush` mutation; Status: poll `donation(id)` query or SSE/WS
 9\. `/notifications` — Manage push topics
-Data: `GET/PUT /me/notifications`
+Data: `me` query + `updateNotificationPrefs` mutation
 
 **Admin**
 10\. `/admin` Dashboard tiles (lag, queues, errors)
@@ -284,7 +294,7 @@ Data: `GET/PUT /me/notifications`
 
 * Data: React Query; invalidate on `leaderboard:update`.
 * Local state: Zustand (UI only).
-* API client: generated from OpenAPI → `packages/types`.
+* API client: GraphQL documents + Zod schemas exported from `packages/types`.
 * Accessibility: Radix, ARIA roles, keyboard nav.
 * Responsive: Tailwind breakpoints; components expose `variant` props.
 * Analytics: PostHog events (`donation_started/succeeded`, `join_started/submitted`, ...).
@@ -304,7 +314,7 @@ pnpm -w run pwa:check
 * **Modules:** `Auth`, `Users`, `TikTok`, `Challenges`, `Submissions`, `Leaderboards`, `Donations`, `Webhooks`, `Admin`.
 * **Providers:** `MongoProvider`, `RedisProvider`, `BullProvider`, `TikTokClient`, `MpesaClient`.
 * **Guards/Interceptors:** `ClerkJwtGuard`, `RoleGuard`, `RateLimit (Redis)`, `RequestId`, `Logging`.
-* **DTO Validation:** Zod (compile to OpenAPI via decorators).
+* **DTO Validation:** Zod mapped to GraphQL input/output types via Nest decorators.
 * **Transactions:** Use `withTransaction` for donation + ledger writes (timeout 5s). Keep transactions tiny.
 * **Bulk ops:** `bulkWrite` for leaderboard entry upserts.
 * **Security:** AES‑256‑GCM token encryption (KMS from Secrets Manager), signed webhooks, HSTS, strict CORS.
@@ -315,8 +325,8 @@ pnpm -w run pwa:check
 
 ### 13.1 STK Push Flow (Happy Path)
 
-1. FE `POST /donations/stkpush { submissionId, amountKES, phoneE164 }`.
-2. API validates, computes `amountCents = round(amountKES*100)`, creates `donations{status:'pending'}` with **idempotency key** `hash(msisdn+submissionId+minute)`; returns `donationId`.
+1. FE executes `requestStkPush { submissionId, amountKES, phoneE164 }` mutation.
+2. API validates, computes `amountCents = round(amountKES*100)`, creates `donations{status:'pending'}` with **idempotency key** `hash(msisdn+submissionId+minute)`; returns `donationId` via GraphQL payload.
 3. API calls Daraja `processrequest` (Password=Base64(ShortCode+Passkey+Timestamp)).
 4. Daraja prompts user; on success, Daraja **webhooks** to `/webhooks/mpesa/stkpush`.
 5. Webhook verifies signature + matches `mpesaCheckoutRequestId`; in a **transaction**:
@@ -363,15 +373,15 @@ Persist all on the donation doc.
 
 ## 14) Workflows (Step‑by‑Step Playbooks)
 
-### A) Add/Change an API Endpoint
+### A) Add/Change a GraphQL Operation
 
-1. **Spec first:** Edit OpenAPI decorators + Zod DTOs in `apps/api` (controllers + schemas). Keep **backwards compatible**.
-2. **Generate FE types:** `pnpm -w run types:gen` → commit changes in `packages/types`.
-3. **Implement service:** Add controller/service methods; add Mongoose models/queries; add indexes if needed.
-4. **Tests:** Unit (Vitest), integration (Supertest + Mongoose memory server). Cover error paths and pagination.
-5. **Docs:** Update endpoint JSDoc and examples; ensure envelope `{data,error,meta}`.
-6. **CI:** PR must pass **openapi‑diff** (no breaking), lint, typecheck, tests.
-7. **FE usage:** Call via generated client only; add React Query hooks; wire loading/skeletons.
+1. **Spec first:** Update GraphQL decorators + Zod DTOs in `apps/api` resolvers. Keep changes backwards compatible (no breaking schema diffs).
+2. **Generate FE artifacts:** `pnpm -w run graphql:gen` → commit changes in `packages/types`.
+3. **Implement service:** Adjust resolvers/services; add Mongoose models/queries; add indexes if needed.
+4. **Tests:** Unit (Vitest), integration (GraphQL e2e via Mercurius testing + Mongoose memory server). Cover error paths and pagination.
+5. **Docs:** Update schema docs/README sections; capture example queries/mutations + expected errors (`extensions.code`).
+6. **CI:** PR must pass **GraphQL schema diff + persisted query checks**, lint, typecheck, tests.
+7. **FE usage:** Consume via generated GraphQL client; add React Query hooks; wire loading/skeletons.
 
 ### B) Add a New Page (FE)
 
@@ -435,15 +445,15 @@ Persist all on the donation doc.
 
 ## 17) CI/CD (GitHub Actions)
 
-**PR pipeline:** type‑check, lint, unit/integration tests, build, **OpenAPI diff**, Docker build for api/worker, Vercel preview for web.
+**PR pipeline:** type‑check, lint, unit/integration tests, build, **GraphQL schema diff + persisted query validation**, Docker build for api/worker, Vercel preview for web.
 **Main:** push images to ECR, Terraform plan/apply (manual approval for prod), Vercel promote.
 **DB:** index sync + validator checks; data migrations via Node scripts run in CI job.
 
 **Required checks (block merge):**
 
 * `lint`, `typecheck`, `test`, `build`
-* `openapi-diff` (no breaking)
-* `pactum` contract tests green
+* `graphql-schema-diff` (no breaking)
+* GraphQL contract tests/persisted query validation green
 
 ---
 
@@ -465,7 +475,7 @@ Persist all on the donation doc.
 * **Unit:** Vitest (both FE/BE). Money and ranking formulas must have golden tests.
 * **Integration:** Supertest with Nest + Mongoose memory server; queues with fakes.
 * **E2E:** Playwright (PWA install, offline donation retry via Background Sync, STK happy path mock).
-* **Contract:** `openapi-enforcer` + `pactum` against generated client.
+* **Contract:** GraphQL schema diffing + persisted query checks against generated client.
 
 ---
 
@@ -481,8 +491,8 @@ Persist all on the donation doc.
 
 ## 21) First Sprint (2 Weeks) — Concrete Deliverables
 
-**Backend:** Nest scaffold + Mongoose; Users/Challenges/Submissions/Donations collections; TikTok OAuth stub; `/challenges`, `/submissions`, `/donations/stkpush` (sandbox), `/webhooks/mpesa/stkpush`; BullMQ wired; leaderboard job returns static Top 3.
-**Frontend:** Next.js PWA, Tailwind, shadcn/ui, Workbox SW, Web Push skeleton; pages `/`, `/challenges`, `/c/[slug]`, `/donate/[submissionId]`, `/me`; API client from OpenAPI; React Query + error boundaries.
+**Backend:** Nest scaffold + Mongoose; Users/Challenges/Submissions/Donations collections; TikTok OAuth stub; GraphQL resolvers for `featuredChallenges`, `challenge`, `requestStkPush` (sandbox), plus `/webhooks/mpesa/stkpush`; BullMQ wired; leaderboard job returns static Top 3.
+**Frontend:** Next.js PWA, Tailwind, shadcn/ui, Workbox SW, Web Push skeleton; pages `/`, `/challenges`, `/c/[slug]`, `/donate/[submissionId]`, `/me`; API client powered by GraphQL documents; React Query + error boundaries.
 **Ops:** GitHub Actions CI, Vercel preview, Dockerfiles, Terraform scaffolding (Atlas + AWS).
 
 ---
@@ -534,7 +544,7 @@ build:
 **Pre‑Commit Checklist (every change):**
 
 * [ ] Lint/typecheck/tests pass locally
-* [ ] OpenAPI updated (if API changed), FE types regenerated
+* [ ] GraphQL schema/artifacts updated (if API changed), FE documents regenerated
 * [ ] DB indexes/validators updated & migration included
 * [ ] Security reviewed (secrets, PII masking, rate limits)
 * [ ] Observability updated (metrics, alerts if needed)
@@ -543,7 +553,7 @@ build:
 **Pre‑Merge Checklist:**
 
 * [ ] All required CI checks green
-* [ ] No breaking openapi diff
+* [ ] No breaking GraphQL schema diff
 * [ ] PWA installable & offline tolerant (if FE impacted)
 * [ ] Load/perf impact considered; caches set/invalidation paths defined
 

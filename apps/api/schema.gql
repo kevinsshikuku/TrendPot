@@ -1,0 +1,19 @@
+type ChallengeSummary {
+  id: String!
+  title: String!
+  tagline: String!
+  raised: Int!
+  goal: Int!
+  currency: String!
+}
+
+type Health {
+  status: String!
+  service: String!
+  uptime: Float!
+}
+
+type Query {
+  featuredChallenges(status: String, limit: Int): [ChallengeSummary!]!
+  health: Health!
+}
