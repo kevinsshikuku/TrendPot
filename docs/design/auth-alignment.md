@@ -19,7 +19,7 @@ Role definitions and permissions remain identical to the previous alignment so w
 
 ### TikTok Identity Source of Truth
 * TikTok OpenAuth is the only entry point for creating authenticated users. We exchange the OpenSDK auth code on the API, encrypt the returned access & refresh tokens with KMS (`AES-256-GCM`), and persist the TikTok user profile (`open_id`, `display_name`, avatar URLs) on the TrendPot user record.
-* Guests: anonymous visitors get a short-lived, unsigned guest cookie (client-managed) for UX continuity, but **no backend session** is created until TikTok login completes.
+* Guests: anonymous visitors get a short-lived, unsigned guest cookie (client-managed) for UX continuity, but **no backend session** is created until TikTok login completes. The API no longer exposes helpers for issuing guest sessions, keeping the implementation aligned with this rule.
 * Progressive profile data (name, phone, preferences) is optional at login. Backend mutations enforce additional fields only when donors/creators attempt privileged actions.
 * A dedicated `ProfileCompletionGuard` wraps high-risk GraphQL mutations (donations, challenge management, payouts) and emits a structured `PROFILE_INCOMPLETE` error with `missingFields` so the UI can prompt for the required details inline.
 
@@ -61,6 +61,7 @@ Mongo schemas now reflect the TikTok linkage and the absence of OTP factors.
 
 ## Observability & Security
 * Instrument TikTok token exchanges, session issuance, and refresh flows with structured logs containing `requestId`, TikTok `open_id`, and user `id`.
+* TikTok login intents sanitise `returnPath` inputs server-side so callbacks can only redirect to TrendPot-controlled routes, preventing open redirect abuse.
 * Sentry scopes include TikTok login context to debug SDK errors.
 * Secrets: TikTok client credentials managed via platform vault; encrypted tokens stored with KMS key versioning.
 

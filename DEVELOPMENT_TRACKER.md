@@ -132,7 +132,7 @@
 
 ## 3. In-House Authentication & Access Control
 - ☑ **Build internal auth service (user store, passwordless/email OTP or similar) with secure session issuance.** _(Owner: Platform)_
-  - Notes: 2025-10-05 – AI – Documented Phase 0 auth alignment (roles, permissions, data models) in `docs/design/auth-alignment.md` and shared Zod contracts; 2025-10-10 – AI – Replaced the OTP prototype with TikTok OAuth, encrypted token storage, Redis-backed login state, and progressive profile mutation + audit trail while deleting legacy OTP artifacts.
+  - Notes: 2025-10-05 – AI – Documented Phase 0 auth alignment (roles, permissions, data models) in `docs/design/auth-alignment.md` and shared Zod contracts; 2025-10-10 – AI – Replaced the OTP prototype with TikTok OAuth, encrypted token storage, Redis-backed login state, and progressive profile mutation + audit trail while deleting legacy OTP artifacts; 2025-10-12 – AI – Hardened TikTok login redirects against open redirects and removed the guest session helper to enforce TikTok-only backend sessions.
 - ☑ **Enforce role-based guards on GraphQL resolvers and admin routes, including rate limiting.** _(Owner: Backend)_
   - Notes: 2025-10-05 – AI – Introduced auth context parsing, viewer contract, role guard, and rate limiter covering admin GraphQL resolvers with audit logging; 2025-10-10 – AI – Added `ProfileCompletionGuard` for donations/challenges/payouts and converted the rate limiter to Redis so enforcement survives multi-instance deployments.
 - ☑ **Restrict CORS to approved origins and introduce Helmet + security headers across API.** _(Owner: Platform)_
