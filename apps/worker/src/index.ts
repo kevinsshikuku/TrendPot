@@ -2,6 +2,7 @@ import { Queue, Worker } from "bullmq";
 import IORedis from "ioredis";
 import { withRetries } from "@trendpot/utils";
 import { createLeaderboardJobHandler } from "./leaderboard-job";
+import { workerLogger } from "./logger";
 
 const connection = new IORedis(process.env.REDIS_URL ?? "redis://localhost:6379");
 
@@ -9,6 +10,8 @@ export const leaderboardQueue = new Queue("leaderboard", { connection });
 
 const jobHandler = createLeaderboardJobHandler();
 
+// Worker is instrumented with structured logging to align with the
+// Foundation Hardening milestone deliverable.
 const worker = new Worker(
   leaderboardQueue.name,
   async () => withRetries(jobHandler, { retries: 2 }),
@@ -16,11 +19,20 @@ const worker = new Worker(
 );
 
 worker.on("completed", (job, result) => {
-  console.log(`[leaderboard] job ${job.id} completed`, result);
+  workerLogger.info(
+    { jobId: job.id, result },
+    "Leaderboard job completed"
+  );
 });
 
 worker.on("failed", (job, err) => {
-  console.error(`[leaderboard] job ${job?.id} failed`, err);
+  workerLogger.error(
+    { jobId: job?.id, err: err.message },
+    "Leaderboard job failed"
+  );
 });
 
-console.log("📊 Worker ready to process leaderboard jobs");
+workerLogger.info(
+  { event: "bootstrap.complete", queue: leaderboardQueue.name },
+  "Worker ready"
+);

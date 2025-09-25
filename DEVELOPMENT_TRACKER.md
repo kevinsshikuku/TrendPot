@@ -115,12 +115,12 @@
 ## 1. Foundation Hardening & Data Seeding
 - ☑ **Author seed scripts for Mongo fixtures (challenges, sample users, submissions) and document runbooks.** _(Owner: Backend)_
   - Notes: 2024-06-06 – AI – Added Mongo seed script and seeding runbook.
-- ☐ **Establish unit/integration test harnesses across apps (`web`, `api`, `worker`) with CI pipelines wired.** _(Owner: DX)_
-  - Notes: 2025-09-25 – AI – Added Node test harnesses for web/api/worker with representative coverage and scripts.
-- ☐ **Implement structured logging (request IDs, correlation IDs) and baseline error envelopes across API + worker.** _(Owner: Platform)_
-  - Notes:
-- ☐ **Capture responsive desktop/mobile design references for baseline pages (`/`, `/challenges`, `/c/[slug]`).** _(Owner: Design)_
-  - Notes:
+- ☑ **Establish unit/integration test harnesses across apps (`web`, `api`, `worker`) with CI pipelines wired.** _(Owner: DX)_
+  - Notes: 2025-09-25 – AI – Added Node test harnesses for web/api/worker with representative coverage and scripts; 2025-10-04 – AI – Wired GitHub Actions CI to enforce lint/typecheck/test gates.
+- ☑ **Implement structured logging (request IDs, correlation IDs) and baseline error envelopes across API + worker.** _(Owner: Platform)_
+  - Notes: 2025-10-04 – AI – Introduced Pino-backed logging, request ID propagation, and GraphQL error envelopes for API and worker services.
+- ☑ **Capture responsive desktop/mobile design references for baseline pages (`/`, `/challenges`, `/c/[slug]`).** _(Owner: Design)_
+  - Notes: 2025-10-04 – AI – Documented Figma references and responsive behaviors for core pages in `docs/design/responsive-baselines.md`.
 
 ## 2. Challenge Management Maturity
 - ☐ **Extend GraphQL schema for challenge lifecycle (create/update/archive, status transitions, optimistic locking).** _(Owner: Backend)_
