@@ -96,7 +96,7 @@ Safaricom Daraja (M‑Pesa): STK Push, optional C2B; later B2C payouts
 
 
 Auth & Sessions
-Clerk (users & sessions). TikTok OAuth handled server‑side in backend.
+In-house NestJS auth service (email OTP + session cookies). TikTok OAuth handled server-side in backend.
 
 
 Infra & Ops
@@ -185,10 +185,28 @@ Validation: Mongoose schemas + MongoDB JSON Schema validator per collection.
 
 
 Collections
-users { _id, clerkUserId, handle, displayName, phoneE164, email, role, createdAt }
+users { _id, email, phone, roles[], status, displayName, metadata, audit, createdAt, updatedAt }
 
 
-Indexes: { clerkUserId: 1 } unique, { handle: 1 } unique, { phoneE164: 1 } sparse
+Indexes: { email: 1 } unique, { phone: 1 } unique sparse
+
+
+auth_factors { _id, userId, type, channel, secretHash, attempts, expiresAt, status, createdAt, updatedAt }
+
+
+Indexes: { userId: 1, type: 1, channel: 1 }, { expiresAt: 1 } TTL
+
+
+sessions { _id, userId, rolesSnapshot, issuedAt, expiresAt, refreshTokenHash, ipAddress, userAgent, status, metadata }
+
+
+Indexes: { refreshTokenHash: 1 } unique, { userId: 1, issuedAt: -1 }, { expiresAt: 1 } TTL
+
+
+audit_logs { _id, actorId, actorRoles, action, targetId, context, severity, createdAt }
+
+
+Indexes: { actorId: 1, createdAt: -1 }, { "context.summary": "text" }
 
 
 tiktok_accounts { _id, userId, openId, accessTokenEnc, refreshTokenEnc, scope, expiresAt, createdAt, updatedAt }
