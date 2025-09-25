@@ -1,3 +1,9 @@
+enum ChallengeStatus {
+  DRAFT
+  LIVE
+  ARCHIVED
+}
+
 type ChallengeSummary {
   id: String!
   title: String!
@@ -5,6 +11,39 @@ type ChallengeSummary {
   raised: Int!
   goal: Int!
   currency: String!
+  status: ChallengeStatus!
+  updatedAt: DateTime!
+  version: Int!
+}
+
+type ChallengeStatusBreakdown {
+  draft: Int!
+  live: Int!
+  archived: Int!
+}
+
+type ChallengeListAnalytics {
+  totalChallenges: Int!
+  totalRaised: Int!
+  totalGoal: Int!
+  averageCompletion: Float!
+  statusBreakdown: ChallengeStatusBreakdown!
+}
+
+type ChallengePageInfo {
+  endCursor: String
+  hasNextPage: Boolean!
+}
+
+type ChallengeEdge {
+  cursor: String!
+  node: ChallengeSummary!
+}
+
+type ChallengeList {
+  edges: [ChallengeEdge!]!
+  pageInfo: ChallengePageInfo!
+  analytics: ChallengeListAnalytics!
 }
 
 type Challenge {
@@ -14,16 +53,28 @@ type Challenge {
   raised: Int!
   goal: Int!
   currency: String!
-  description: String!
-  status: String!
-  createdAt: DateTime!
+  status: ChallengeStatus!
   updatedAt: DateTime!
+  version: Int!
+  description: String!
+  createdAt: DateTime!
 }
 
 type Health {
   status: String!
   service: String!
   uptime: Float!
+}
+
+input ChallengeListFilterInput {
+  status: ChallengeStatus
+  search: String
+}
+
+input ChallengeListInput {
+  first: Int
+  after: String
+  filter: ChallengeListFilterInput
 }
 
 input CreateChallengeInput {
@@ -33,18 +84,37 @@ input CreateChallengeInput {
   description: String!
   goal: Int!
   currency: String
-  status: String
+  status: ChallengeStatus
+}
+
+input UpdateChallengeInput {
+  id: String!
+  expectedVersion: Int!
+  title: String
+  tagline: String
+  description: String
+  goal: Int
+  currency: String
+  status: ChallengeStatus
+}
+
+input ArchiveChallengeInput {
+  id: String!
+  expectedVersion: Int!
 }
 
 type Query {
   featuredChallenges(status: String, limit: Int): [ChallengeSummary!]!
   challenges(status: String, limit: Int): [ChallengeSummary!]!
+  challengeAdminList(input: ChallengeListInput): ChallengeList!
   challenge(id: String!): Challenge
   health: Health!
 }
 
 type Mutation {
   createChallenge(input: CreateChallengeInput!): Challenge!
+  updateChallenge(input: UpdateChallengeInput!): Challenge!
+  archiveChallenge(input: ArchiveChallengeInput!): Challenge!
 }
 
 scalar DateTime

@@ -1,4 +1,5 @@
 import { Field, InputType, Int } from "@nestjs/graphql";
+import { ChallengeStatus } from "./challenge-status.enum";
 
 @InputType()
 export class CreateChallengeInputModel {
@@ -20,6 +21,6 @@ export class CreateChallengeInputModel {
   @Field({ nullable: true })
   declare currency?: string;
 
-  @Field({ nullable: true })
-  declare status?: string;
+  @Field(() => ChallengeStatus, { nullable: true })
+  declare status?: ChallengeStatus;
 }

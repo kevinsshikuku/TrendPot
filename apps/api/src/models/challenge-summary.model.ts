@@ -1,4 +1,6 @@
 import { Field, Int, ObjectType } from "@nestjs/graphql";
+import { GraphQLISODateTime } from "@nestjs/graphql";
+import { ChallengeStatus } from "./challenge-status.enum";
 
 @ObjectType("ChallengeSummary")
 export class ChallengeSummaryModel {
@@ -19,4 +21,13 @@ export class ChallengeSummaryModel {
 
   @Field()
   declare currency: string;
+
+  @Field(() => ChallengeStatus)
+  declare status: ChallengeStatus;
+
+  @Field(() => GraphQLISODateTime)
+  declare updatedAt: Date;
+
+  @Field(() => Int)
+  declare version: number;
 }
