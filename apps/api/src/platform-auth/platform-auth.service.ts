@@ -3,7 +3,6 @@ import {
   createHash,
   createHmac,
   randomBytes,
-  randomInt,
   timingSafeEqual
 } from "node:crypto";
 import { URLSearchParams } from "node:url";
@@ -31,6 +30,7 @@ import { UserEntity } from "./schemas/user.schema";
 import { RateLimitService } from "../auth/rate-limit.service";
 import { AuthAuditService } from "../auth/auth-audit.service";
 import { RedisService } from "../redis/redis.service";
+import { sanitizeReturnPath } from "./return-path.util";
 
 const SESSION_TTL_HOURS = Number(process.env.AUTH_SESSION_TTL_HOURS ?? 24);
 const REFRESH_TTL_DAYS = Number(process.env.AUTH_REFRESH_TTL_DAYS ?? 14);
@@ -159,6 +159,7 @@ export class PlatformAuthService {
 
     const normalizedScopes = Array.isArray(scopes) && scopes.length > 0 ? scopes : DEFAULT_TIKTOK_SCOPES;
     const resolvedRedirectUri = redirectUri ?? TIKTOK_REDIRECT_URI;
+    const sanitizedReturnPath = sanitizeReturnPath(returnPath);
 
     if (!TIKTOK_CLIENT_KEY || !TIKTOK_CLIENT_SECRET || !resolvedRedirectUri) {
       throw new BadRequestException("TikTok OAuth is not configured correctly");
@@ -184,7 +185,7 @@ export class PlatformAuthService {
     const statePayload: TikTokStateRecord = {
       redirectUri: resolvedRedirectUri,
       scopes: normalizedScopes,
-      returnPath,
+      ...(sanitizedReturnPath ? { returnPath: sanitizedReturnPath } : {}),
       deviceLabel
     };
 
@@ -207,7 +208,7 @@ export class PlatformAuthService {
       clientKey: TIKTOK_CLIENT_KEY,
       redirectUri: resolvedRedirectUri,
       scopes: normalizedScopes,
-      returnPath
+      returnPath: sanitizedReturnPath
     };
   }
 
@@ -231,6 +232,7 @@ export class PlatformAuthService {
 
     await client.del(redisKey);
     const stateRecord = JSON.parse(serialized) as TikTokStateRecord;
+    const sanitizedReturnPath = sanitizeReturnPath(stateRecord.returnPath);
 
     const tokenExchange = await this.exchangeTikTokCode({
       code,
@@ -293,65 +295,7 @@ export class PlatformAuthService {
     return {
       session,
       user,
-      redirectPath: stateRecord.returnPath
-    };
-  }
-
-  async createGuestSession(params: {
-    displayName?: string;
-    deviceLabel?: string;
-  } & RequestContextMetadata): Promise<TikTokLoginResult> {
-    const { displayName, deviceLabel, logger, requestId, ipAddress, userAgent, reply } = params;
-
-    const trimmed = typeof displayName === "string" ? displayName.trim() : "";
-    const guestDisplayName = trimmed.length > 0 ? trimmed : `Guest ${randomInt(1000, 9999)}`;
-
-    const user = await this.userModel.create({
-      email: null,
-      displayName: guestDisplayName,
-      roles: ["fan"],
-      status: "active",
-      metadata: { authOrigin: "guest", guest: true },
-      audit: { lastLoginAt: new Date() },
-      tiktokScopes: []
-    });
-
-    const session = await this.issueSession({
-      user,
-      logger,
-      requestId,
-      ipAddress,
-      userAgent,
-      deviceLabel,
-      reply,
-      tiktokOpenId: undefined
-    });
-
-    await this.appendAuditLog({
-      actorId: user.id,
-      actorRoles: user.roles,
-      action: "auth.session.issue",
-      severity: "info",
-      requestId,
-      ipAddress,
-      userAgent,
-      summary: `Bootstrapped guest session ${session.id}`
-    });
-
-    logger.info(
-      {
-        event: "auth.session.guest_issued",
-        sessionId: session.id,
-        userId: user.id,
-        requestId,
-        ipAddress
-      },
-      "Guest session issued"
-    );
-
-    return {
-      session,
-      user: this.mapUserDocument(user)
+      redirectPath: sanitizedReturnPath
     };
   }
 
