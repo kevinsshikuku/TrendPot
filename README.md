@@ -970,6 +970,9 @@ Local dev uses Docker Compose: MongoDB, Redis, mailhog (if needed).
 make dev runs web/api/worker concurrently.
 
 
+Database fixtures: `pnpm -w run db:seed` (see `docs/runbooks/db-seeding.md` for details).
+
+
 
 18) CI/CD Pipelines (GitHub Actions)
 PR: type‑check, lint, unit/integration tests, build, GraphQL schema diff + persisted query check (fail on breaking), Vercel preview, Docker build of api/worker.
