@@ -37,7 +37,7 @@ Frontend team owns Next.js app + shared UI lib.
 Backend team owns NestJS API, queues/workers, webhooks.
 
 
-Strict API contract: REST + OpenAPI 3.1; FE types are generated.
+Strict API contract: GraphQL schema-first; FE operations are generated.
 
 
 Event/queue architecture for sync/refresh/webhooks and leaderboards.
@@ -73,7 +73,7 @@ PWA: Workbox (service worker), Web Push (VAPID), Manifest v3
 
 
 Backend
-NestJS 10 (REST, Fastify adapter), OpenAPI, Helmet, CORS
+NestJS 10 (GraphQL over Fastify via Mercurius), GraphQL schema linting, Helmet, CORS
 
 
 MongoDB Atlas 7.x (Global Clusters, sharded) with Mongoose 8.x (or Typegoose)
@@ -129,14 +129,14 @@ Product analytics: PostHog
 
 
 CI/CD
-GitHub Actions: type‑check, lint, test, build, OpenAPI diff, Docker build, deploy to Vercel/AWS
+GitHub Actions: type‑check, lint, test, build, GraphQL schema diff, Docker build, deploy to Vercel/AWS
 
 
 Testing
 Unit: Vitest; Integration: Supertest (Nest), Mongoose memory server; E2E: Playwright
 
 
-Contract: OpenAPI enforced (openapi‑enforcer) + pactum
+Contract: GraphQL schema diffing + persisted query validation
 
 
 
@@ -148,7 +148,7 @@ Contract: OpenAPI enforced (openapi‑enforcer) + pactum
     worker/             # BullMQ consumers & schedulers
   packages/
     ui/                 # Shared React UI library (design system)
-    types/              # OpenAPI‑generated TS types + Zod schemas
+    types/              # GraphQL documents, TS types + Zod schemas
     config/             # ESLint, tsconfig, tailwind preset
     utils/              # Shared utilities (dates, money, fetch)
   infra/
@@ -157,7 +157,7 @@ Contract: OpenAPI enforced (openapi‑enforcer) + pactum
   .github/workflows/    # CI pipelines
 
 Rules
-FE consumes only REST via packages/types client. No cross‑import into API.
+FE consumes only GraphQL via packages/types client. No cross‑import into API.
 
 
 All shared UI primitives live in packages/ui.
@@ -291,80 +291,65 @@ Backend proxy /embed?url=… fetches oEmbed → sanitize → FE renders <TikTokE
 
 
 M‑Pesa Daraja (STK Push)
-POST /donations/stkpush triggers /mpesa/stkpush/v1/processrequest.
+`requestStkPush` mutation triggers /mpesa/stkpush/v1/processrequest.
 
 
 Webhook /webhooks/mpesa/stkpush verifies signature → upserts donation by mpesaCheckoutRequestId → status transitions with idempotency.
 
 
 
-7) API (REST, OpenAPI 3.1) — Paths & Contracts
-Auth & Profiles
-GET /me → user profile, connected TikTok, totals
+7) API (GraphQL Schema) — Queries & Mutations
+All client/server contracts flow through a single GraphQL endpoint (`POST /graphql`).
+The SDL is the source of truth, committed in-repo and validated in CI to prevent
+breaking changes. Persisted queries (hash → document) back the PWA to guarantee
+only reviewed operations hit production.
 
+### Core Queries
+| Operation | Shape | Purpose |
+| --- | --- | --- |
+| `health` | `Health!` | Service uptime + identifier for smoke tests. |
+| `me` | `User` | Authenticated user profile, linked TikTok account, donation totals. |
+| `featuredChallenges(status, limit)` | `[ChallengeSummary!]!` | Surface active challenges for the home feed (used by PWA hero grid). |
+| `challenge(id)` | `Challenge` | Challenge detail including leaderboard preview, submission counts, donation progress. |
+| `challengeSubmissions(id, state, after, first)` | `SubmissionConnection!` | Moderator + creator views with keyset pagination. |
+| `challengeLeaderboard(id, first, after)` | `LeaderboardConnection!` | Full leaderboard with cursor pagination + node metrics. |
+| `creatorVideos(after)` | `VideoConnection!` | TikTok video library for submission flow (server-side TikTok API integration). |
+| `donation(id)` | `Donation` | Lookup donation status for post-checkout polling. |
+| `creatorDonations(creatorId, after)` | `DonationConnection!` | Creator earnings history. |
 
-TikTok Connect & Videos
-GET /tiktok/oauth/start → redirect URL
+### Mutations
+| Operation | Purpose |
+| --- | --- |
+| `startTikTokOAuth(redirectUri)` | Issues TikTok authorization URL and stores CSRF/verifier material. |
+| `completeTikTokOAuth(code, state)` | Exchanges code for tokens, encrypts secrets, links TikTok account. |
+| `submitToChallenge(challengeId, videoId)` | Creates a submission in `pending` state with audit trail + idempotency. |
+| `moderateSubmission(submissionId, decision)` | Moderator workflow to approve/reject with reason logging. |
+| `upsertChallenge(input)` | Admin mutation to create/update challenge metadata. |
+| `publishChallenge(challengeId)` | Toggles challenge visibility + schedules leaderboard jobs. |
+| `requestStkPush(input)` | Initiates M-Pesa donation, enforces amount validation + idempotency keys. |
 
+### Webhooks & Out-of-band Integrations
+* TikTok webhooks remain REST (per provider requirements) and feed dedicated
+  queues before resolvers surface updates.
+* `POST /webhooks/mpesa/stkpush` stays HTTP to satisfy Safaricom callbacks;
+  the resolver-backed donation queries consume the resulting state changes.
 
-GET /tiktok/oauth/callback → persist tokens, redirect /me
-
-
-GET /tiktok/videos?mine=true&after=<cursor> → list creator videos with metrics
-
-
-Challenges
-GET /challenges?status=live&cursor=…
-
-
-POST /challenges [admin]
-
-
-GET /challenges/:id → includes top3, summary metrics, submission count
-
-
-PATCH /challenges/:id [admin]
-
-
-POST /challenges/:id/publish [admin]
-
-
-Submissions
-POST /challenges/:id/submissions { videoId } → state pending
-
-
-POST /submissions/:id/approve|reject [moderator]
-
-
-GET /challenges/:id/submissions?state=approved&cursor=…
-
-
-Leaderboards
-GET /challenges/:id/leaderboard?limit=100
-
-
-GET /challenges/:id/top3
-
-
-Donations
-POST /donations/stkpush { submissionId, amountKES, phoneE164 }
-
-
-GET /donations/:id → status
-
-
-GET /creators/:id/donations
-
-
-Webhooks: POST /webhooks/mpesa/stkpush
+### Governance
+* Schema lives in `apps/api/src/**/*.graphql.ts` via Nest GraphQL code-first
+  decorators; `apps/api/schema.gql` is emitted on build for review and for
+  persisted query validation.
+* `packages/types` bundles typed documents + Zod schemas for each approved
+  operation. Add new operations there and re-run the GraphQL generation script
+  (`pnpm -w run graphql:gen`) whenever the schema evolves.
 
 
 Admin/Moderation
-GET /admin/reports, POST /admin/submissions/:id/flag, GET /admin/audit
+`adminReports` query, `flagSubmission` mutation, `adminAuditLog` query
 
 
 Conventions
-Envelope: { data, error, meta } + x-request-id header on responses.
+GraphQL errors return `extensions.code` (e.g. `E_VALIDATION`, `E_RATE_LIMIT`) and
+always propagate `x-request-id` via response headers for tracing.
 
 
 All inputs validated by Zod DTOs; sanitize outputs.
@@ -408,7 +393,7 @@ dlqHandler: monitor dead‑letter queues
 
 
 10) Caching & Performance
-Redis: cache GET /challenges/:id/top3 for 60s; invalidate on leaderboard compute.
+Redis: cache `challengeLeaderboard` top3 slice for 60s; invalidate on leaderboard compute.
 
 
 HTTP caching/CDN: s-maxage=60, stale-while-revalidate=120 for public reads.
@@ -431,7 +416,7 @@ Service Worker (Workbox):
 StaleWhileRevalidate for app shell, CacheFirst for static, NetworkFirst for JSON with small TTL
 
 
-Background Sync: queue failed POST /donations/stkpush and retry
+Background Sync: queue failed `requestStkPush` mutations and retry
 
 
 Web Push:
@@ -453,7 +438,7 @@ Public
 / Home — Featured live challenges
 
 
-Data: GET /challenges?status=live&limit=6 (API→Mongo)
+Data: `featuredChallenges(status: "live", limit: 6)` query (API→Mongo)
 
 
 Actions: open challenge → /c/[slug]
@@ -462,7 +447,7 @@ Actions: open challenge → /c/[slug]
 /challenges Explore Challenges — Filters + infinite scroll
 
 
-Data: GET /challenges?cursor=<id> (API→Mongo)
+Data: `challenges(first, after, filters)` query (API→Mongo)
 
 
 Actions: click a challenge → /c/[slug]
@@ -474,13 +459,13 @@ Actions: click a challenge → /c/[slug]
 Data:
 
 
-GET /challenges/:id (API→Mongo)
+`challenge(id)` (API→Mongo)
 
 
-GET /challenges/:id/top3 (API→Redis/Mongo)
+`challengeLeaderboard(id, first)` (API→Redis/Mongo)
 
 
-GET /challenges/:id/submissions?state=approved&cursor=<id> (API→Mongo)
+`challengeSubmissions(id, state: approved, after)` (API→Mongo)
 
 
 Realtime: subscribe to leaderboard:update via SSE/WS
@@ -492,7 +477,7 @@ Actions: Join (creators), Donate (fans)
 /s/[submissionId] Submission Detail — TikTok embed + metrics + donation widget
 
 
-Data: GET /submissions/:id (API→Mongo + oEmbed HTML via API proxy)
+Data: `submission(id)` (API→Mongo + oEmbed HTML via API proxy)
 
 
 Actions: Donate → /donate/[submissionId]
@@ -503,10 +488,10 @@ Authenticated
 If TikTok not connected → /connect/tiktok
 
 
-List my videos (with metrics) → select one → POST /challenges/:id/submissions
+List my videos (with metrics) → select one → `submitToChallenge` mutation
 
 
-Data: GET /tiktok/videos?mine=true&after=<cursor> (API→TikTok Display API→Mongo cache)
+Data: `creatorVideos(after)` query (API→TikTok Display API→Mongo cache)
 
 
 /connect/tiktok TikTok Connect — OAuth start/callback
@@ -518,49 +503,49 @@ Data: redirects via backend; on success → /me
 /me My Profile — Submissions, donations (made/received), TikTok status
 
 
-Data: GET /me, GET /creators/:id/donations (API→Mongo)
+Data: `me` + `creatorDonations(creatorId, after)` queries (API→Mongo)
 
 
 /donate/[submissionId] Donate — Phone + amount → STK Push
 
 
-Action: POST /donations/stkpush
+Action: `requestStkPush` mutation
 
 
-Status: poll GET /donations/:id or subscribe to SSE/WS
+Status: poll `donation(id)` query or subscribe to SSE/WS
 
 
 /notifications Notifications — Manage push topics
 
 
-Data: GET/PUT /me/notifications (API→Mongo)
+Data: `me` query + `updateNotificationPrefs` mutation (API→Mongo)
 
 
 Admin/Moderation
  10. /admin Dashboard — Metrics tiles
- - Data: GET /admin/summary (API→Mongo + Redis)
+ - Data: `adminSummary` query (API→Mongo + Redis)
 /admin/challenges & /admin/challenges/new|:id — CRUD/publish
 
 
-Data: GET/POST/PATCH /challenges (API→Mongo)
+Data: `upsertChallenge` mutation + `challenge(id)` query (API→Mongo)
 
 
 /admin/submissions — Review queue
 
 
-Data: GET /submissions?state=pending&cursor=<id> (API→Mongo)
+Data: `challengeSubmissions(state: pending, after)` query (API→Mongo)
 
 
 /admin/donations — Reconciliation
 
 
-Data: GET /admin/donations?date=… (API→Mongo)
+Data: `adminDonations(dateRange)` query (API→Mongo)
 
 
 /admin/audit — Security log
 
 
-Data: GET /admin/audit?actor=… (API→Mongo)
+Data: `adminAuditLog(actor, after)` query (API→Mongo)
 
 
 Shared UI Library (packages/ui)
@@ -578,7 +563,7 @@ Data layer: React Query for server cache; invalidate on leaderboard:update.
 Local state: Zustand (UI only). No server state inside Zustand.
 
 
-API client: generated from OpenAPI via openapi-typescript in packages/types.
+API client: GraphQL documents + Zod validation exported from packages/types.
 
 
 Error boundaries and skeletons everywhere.
@@ -604,7 +589,7 @@ Providers: MongoProvider (Mongoose connection), RedisProvider, BullProvider (que
 Guards: Clerk JWT guard, RoleGuard. Interceptors: RateLimit (Redis sliding window), RequestId, Logging.
 
 
-DTO Validation: Zod schemas; compile to OpenAPI using decorators + @nestjs/swagger.
+DTO Validation: Zod schemas; map to GraphQL input types via Nest decorators (code-first).
 
 
 Transactions: use withTransaction for donation + ledger writes; time out at 5s.
@@ -633,7 +618,7 @@ STK Push: POST /mpesa/stkpush/v1/processrequest with required fields (BusinessSh
 Callback: verify, update donations.status = paid|failed, store raw payload, emit donation:update to Redis.
 
 
-Idempotency: Idempotency‑Key on our /donations/stkpush (hash of MSISDN+submissionId+minute); dedupe mpesaCheckoutRequestId unique index.
+Idempotency: `requestStkPush` accepts an idempotency key (hash of MSISDN+submissionId+minute); dedupe mpesaCheckoutRequestId unique index.
 
 
 Recon: daily job cross‑checks Daraja statements (if available) or internal logs.
@@ -653,7 +638,7 @@ Rounding: HALF‑UP to 2dp when converting to KES display; all ledger postings u
 15.2) Money Flow — Collection → Processing → Distribution
 Actors: Donor, Platform (App), Creator, M‑Pesa.
 Collection (STK Push)
-Donor initiates donation in UI → API POST /donations/stkpush.
+Donor initiates donation in UI → GraphQL `requestStkPush` mutation.
 
 
 API creates donations doc with status='pending', generates Posting Batch (see 15.6) in journal_entries with state='prepared' (no effect yet), writes idempotency key (submissionId+msisdn+minute).
@@ -874,7 +859,7 @@ Store all 3 components on the donations document: { creatorShareCents, commissio
 Persist a journal_entries batch with lines exactly as in 15.6(A).
 
 
-Expose values to FE in GET /donations/:id.
+Expose values to FE via the `donation(id)` query.
 
 
 15.8) Wallets & Available Balance Rules
@@ -987,7 +972,7 @@ make dev runs web/api/worker concurrently.
 
 
 18) CI/CD Pipelines (GitHub Actions)
-PR: type‑check, lint, unit/integration tests, build, OpenAPI diff (fail on breaking), Vercel preview, Docker build of api/worker.
+PR: type‑check, lint, unit/integration tests, build, GraphQL schema diff + persisted query check (fail on breaking), Vercel preview, Docker build of api/worker.
 
 
 Main: push images to ECR, Terraform plan/apply (manual approval for prod), Vercel promote.
@@ -1046,7 +1031,7 @@ Next.js PWA, Tailwind, shadcn/ui, Workbox SW, Web Push skeleton
 Pages: /, /challenges, /c/[slug], /donate/[submissionId], /me
 
 
-API client from OpenAPI; React Query + error boundaries
+API client powered by GraphQL documents; React Query + error boundaries
 
 
 Ops
