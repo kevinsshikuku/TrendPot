@@ -9,8 +9,11 @@ import type {
   AuditLogSeverity,
   Session,
   SessionStatus,
+  User,
+  UserPermission,
   UserRole
 } from "@trendpot/types";
+import { rolePermissions } from "@trendpot/types";
 import { AuthEmailService } from "./email.service";
 import type { AuditLogDocument } from "./schemas/audit-log.schema";
 import { AuditLogEntity } from "./schemas/audit-log.schema";
@@ -43,12 +46,21 @@ interface RequestContextMetadata {
 interface IssueOtpParams extends RequestContextMetadata {
   email: string;
   displayName?: string;
+  deviceLabel?: string;
 }
 
 interface VerifyOtpParams extends RequestContextMetadata {
   email: string;
   otpCode: string;
   token: string;
+}
+
+interface RevokeSessionParams extends RequestContextMetadata {
+  sessionId: string;
+  userId: string;
+  roles: UserRole[];
+  reply?: FastifyReply;
+  reason?: string;
 }
 
 type SessionTokenPayload = {
@@ -63,6 +75,11 @@ type OtpTokenPayload = {
   expiresAt: number;
   nonce: string;
 };
+
+interface VerifyOtpResult {
+  session: Session;
+  user: User;
+}
 
 @Injectable()
 export class PlatformAuthService {
@@ -211,7 +228,7 @@ export class PlatformAuthService {
     return { token, expiresAt };
   }
 
-  async verifyEmailOtp(params: VerifyOtpParams) {
+  async verifyEmailOtp(params: VerifyOtpParams): Promise<VerifyOtpResult> {
     const { email, otpCode, token, logger, requestId, ipAddress, userAgent, deviceLabel, reply } = params;
     const normalizedEmail = email.trim().toLowerCase();
 
@@ -291,7 +308,7 @@ export class PlatformAuthService {
       deviceLabel,
       reply
     });
-
+    const mappedUser = this.mapUserDocument(user);
     await this.appendAuditLog({
       actorId: user.id,
       actorRoles: user.roles,
@@ -315,7 +332,10 @@ export class PlatformAuthService {
       "Session issued after OTP verification"
     );
 
-    return session;
+    return {
+      session,
+      user: mappedUser
+    };
   }
 
   private generateOtpCode() {
@@ -439,21 +459,85 @@ export class PlatformAuthService {
       },
       "Session and refresh cookies prepared"
     );
+    return this.mapSessionDocument(sessionDoc);
+  }
 
-    const session: Session = {
-      id: sessionDoc.id,
-      userId: sessionDoc.userId.toString(),
-      rolesSnapshot: sessionDoc.rolesSnapshot as UserRole[],
-      issuedAt: issuedAt.toISOString(),
-      expiresAt: expiresAt.toISOString(),
-      refreshTokenHash: refreshTokenHash,
+  async listSessionsForUser(userId: string): Promise<Session[]> {
+    const sessions = await this.sessionModel
+      .find({ userId })
+      .sort({ issuedAt: -1 })
+      .limit(Number(process.env.AUTH_SESSION_HISTORY_LIMIT ?? 20))
+      .exec();
+
+    return sessions.map((doc) => this.mapSessionDocument(doc));
+  }
+
+  async revokeSession(params: RevokeSessionParams): Promise<Session | null> {
+    const { sessionId, userId, logger, requestId, ipAddress, userAgent, reply, reason = "user_revocation", roles } = params;
+
+    const sessionDoc = await this.sessionModel.findOne({ _id: sessionId, userId }).exec();
+
+    if (!sessionDoc) {
+      logger.warn(
+        {
+          event: "auth.session.revoke_missing",
+          sessionId,
+          userId,
+          requestId
+        },
+        "Attempted to revoke a session that does not exist or does not belong to the user"
+      );
+      return null;
+    }
+
+    if (sessionDoc.status === "revoked") {
+      return this.mapSessionDocument(sessionDoc);
+    }
+
+    sessionDoc.status = "revoked";
+    sessionDoc.expiresAt = new Date();
+    await sessionDoc.save();
+
+    if (reply) {
+      this.clearSessionCookies(reply);
+    }
+
+    await this.appendAuditLog({
+      actorId: userId,
+      actorRoles: roles,
+      action: "auth.session.revoke",
+      severity: "info",
+      requestId,
       ipAddress,
       userAgent,
-      status: sessionDoc.status as SessionStatus,
-      metadata: sessionDoc.metadata
-    };
+      targetId: sessionId,
+      summary: `Revoked session ${sessionId} (${reason})`
+    });
 
-    return session;
+    logger.info(
+      {
+        event: "auth.session.revoked",
+        sessionId,
+        userId,
+        requestId,
+        reason
+      },
+      "Session revoked"
+    );
+
+    return this.mapSessionDocument(sessionDoc);
+  }
+
+  async logoutCurrentSession(params: RevokeSessionParams): Promise<Session | null> {
+    return this.revokeSession(params);
+  }
+
+  async getUserById(userId: string): Promise<User | null> {
+    const user = await this.userModel.findById(userId).exec();
+    if (!user) {
+      return null;
+    }
+    return this.mapUserDocument(user);
   }
 
   private async appendAuditLog(params: {
@@ -482,5 +566,65 @@ export class PlatformAuthService {
         summary
       }
     });
+  }
+  private clearSessionCookies(reply: FastifyReply) {
+    const secure = process.env.NODE_ENV === "production";
+    const baseOptions = {
+      httpOnly: true,
+      sameSite: "lax" as const,
+      secure,
+      domain: COOKIE_DOMAIN,
+      path: "/"
+    };
+
+    reply.clearCookie(SESSION_COOKIE_NAME, baseOptions);
+    reply.clearCookie(REFRESH_COOKIE_NAME, {
+      ...baseOptions,
+      sameSite: "strict",
+      path: "/auth/refresh"
+    });
+  }
+
+  private mapSessionDocument(sessionDoc: SessionDocument): Session {
+    const rawId = (sessionDoc as SessionDocument & { _id: { toString(): string } })._id;
+    const id = typeof sessionDoc.id === "string" && sessionDoc.id.length > 0 ? sessionDoc.id : rawId.toString();
+
+    return {
+      id,
+      userId: String(sessionDoc.userId),
+      rolesSnapshot: sessionDoc.rolesSnapshot as UserRole[],
+      issuedAt: sessionDoc.issuedAt.toISOString(),
+      expiresAt: sessionDoc.expiresAt.toISOString(),
+      refreshTokenHash: sessionDoc.refreshTokenHash,
+      ipAddress: sessionDoc.ipAddress,
+      userAgent: sessionDoc.userAgent,
+      status: sessionDoc.status as SessionStatus,
+      metadata: sessionDoc.metadata,
+    };
+  }
+
+  private mapUserDocument(user: UserDocument): User {
+    const roles = [...user.roles] as UserRole[];
+    const permissions = new Set<UserPermission>();
+
+    for (const role of roles) {
+      const rolePerms = rolePermissions[role] ?? [];
+      for (const permission of rolePerms) {
+        permissions.add(permission);
+      }
+    }
+
+    return {
+      id: user.id,
+      email: user.email,
+      phone: user.phone,
+      displayName: user.displayName,
+      roles,
+      permissions: Array.from(permissions),
+      status: user.status,
+      createdAt: user.createdAt?.toISOString?.() ?? new Date().toISOString(),
+      updatedAt: user.updatedAt?.toISOString?.() ?? new Date().toISOString(),
+      metadata: user.metadata as Record<string, unknown> | undefined
+    };
   }
 }

@@ -1,13 +1,35 @@
-class BadRequestException extends Error {}
+class NestException extends Error {
+  constructor(message) {
+    super(message);
+    this.name = new.target.name;
+  }
+}
+
+class BadRequestException extends NestException {}
+class UnauthorizedException extends NestException {}
+class ForbiddenException extends NestException {}
+class TooManyRequestsException extends NestException {}
+
 const decorator = () => () => undefined;
 const Module = decorator;
 const Injectable = decorator;
+const SetMetadata = () => decorator();
+
 class Logger {
-  log() {
-    /* no-op for tests */
-  }
-  error() {
-    /* no-op for tests */
-  }
+  log() {}
+  error() {}
+  warn() {}
+  info() {}
+  debug() {}
 }
-module.exports = { BadRequestException, Module, Injectable, Logger };
+
+module.exports = {
+  BadRequestException,
+  UnauthorizedException,
+  ForbiddenException,
+  TooManyRequestsException,
+  Module,
+  Injectable,
+  SetMetadata,
+  Logger
+};

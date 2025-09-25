@@ -43,7 +43,7 @@ Strict API contract: GraphQL schema-first; FE operations are generated.
 Event/queue architecture for sync/refresh/webhooks and leaderboards.
 
 
-Security: OAuth tokens, webhook signature verification, idempotency, rate limits, audit logs.
+Security: OAuth tokens, webhook signature verification, idempotency, rate limits, audit logs. Configure API CORS allowlists via `ALLOWED_ORIGINS` (comma-separated origins); disallowed origins receive 403 responses and no CORS headers.
 
 
 
@@ -604,7 +604,7 @@ Modules: AuthModule, UsersModule, TikTokModule, ChallengesModule, SubmissionsMod
 Providers: MongoProvider (Mongoose connection), RedisProvider, BullProvider (queues), TikTokClient, MpesaClient.
 
 
-Guards: Clerk JWT guard, RoleGuard. Interceptors: RateLimit (Redis sliding window), RequestId, Logging.
+Guards: Platform session guard + RolesGuard (email OTP sessions). Interceptors: RateLimit (in-memory for auth/admin), RequestId, Logging.
 
 
 DTO Validation: Zod schemas; map to GraphQL input types via Nest decorators (code-first).

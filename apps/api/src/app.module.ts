@@ -4,7 +4,7 @@ import { APP_GUARD } from "@nestjs/core";
 import { GraphQLModule } from "@nestjs/graphql";
 import { MongooseModule } from "@nestjs/mongoose";
 import { MercuriusDriver, MercuriusDriverConfig } from "@nestjs/mercurius";
-
+import { RateLimitGuard } from "./auth/rate-limit.guard";
 import { RolesGuard } from "./auth/roles.guard";
 import { AppService } from "./app.service";
 import { ChallengeResolver } from "./challenge.resolver";

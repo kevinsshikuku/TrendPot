@@ -54,11 +54,15 @@ export const resolveAuthContext = (
       const parsed = sessionSchema.parse(headers.data.session);
       session = {
         id: parsed.id,
+        userId: parsed.userId,
+        rolesSnapshot: parsed.rolesSnapshot,
         issuedAt: parsed.issuedAt,
         expiresAt: parsed.expiresAt,
+        refreshTokenHash: parsed.refreshTokenHash,
         ipAddress: parsed.ipAddress,
         userAgent: parsed.userAgent,
-        status: parsed.status
+        status: parsed.status,
+        metadata: parsed.metadata
       };
     } catch (error) {
       logger.warn({ error }, "Rejected malformed session payload from auth header");

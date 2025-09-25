@@ -53,12 +53,35 @@ This document is the single source of truth for how TrendPot is wired end-to-end
   * Keep skeleton placeholders equal to `FEATURED_CHALLENGE_LIMIT` to avoid layout shift.
   * Maintain currency formatting fallback so unsupported ISO codes gracefully render.
 
-### Upcoming routes
-These routes are referenced in the UX but missing page files. Treat them as highest-priority gaps for frontend enablement.
+### Authentication flows (`/login`, `/signup`, `/auth/verify`)
+* Files: `apps/web/src/app/(auth)/login/page.tsx`, `apps/web/src/app/(auth)/signup/page.tsx`, `apps/web/src/app/auth/verify/page.tsx`
+* Responsibilities:
+  * Render passwordless enrollment/login experiences with responsive cards, adaptive typography, and sticky call-to-action buttons on mobile viewports.
+  * Use React Query mutations that call internal API routes (`/api/auth/request-otp`, `/api/auth/verify-otp`) which proxy GraphQL auth mutations, forward Fastify cookies, and capture viewer/session payload cookies for subsequent requests.
+  * Respect the `next` query param propagated by middleware so successful verifications return viewers to their original destination.
+* Client flow:
+  1. User submits email (and display name for signup); `requestEmailOtp` mutation posts to `/api/auth/request-otp` and navigates to `/auth/verify` with challenge metadata.
+  2. OTP form enforces numeric entry, sends `{ email, otpCode, token, deviceLabel }` to `/api/auth/verify-otp`, and redirects to `/account` or the sanitised `next` path on success.
+  3. Error states surface toast-style inline banners; CTAs remain sticky on small screens and copy scales with Tailwind responsive tokens.
+* Session management:
+  * API routes persist `trendpot.user` / `trendpot.session` cookies (base64-encoded viewer + session payload) and forward server-set session/refresh cookies for the NestJS service.
+  * `apps/web/middleware.ts` enforces login for `/account` and `/admin` routes, redirects unauthenticated users back through `/login?next=…`, and blocks non-admin roles with a friendly `/account?error=forbidden` banner.
+* Validation coverage: `apps/api/src/platform-auth.e2e.test.ts` exercises the passwordless registration/login flow, ensures refresh-token hashing matches issued cookies, and asserts admin mutations remain role-gated.
 
-| Route | Purpose | Notes |
-| --- | --- | --- |
-| `/me` | Account dashboard for admins/creators. | Requires auth wiring (Clerk) and role-based content. |
+### Account dashboard (`/account`, `/me`)
+* File: `apps/web/src/app/account/page.tsx`
+* Routing: `/me` is fulfilled by the same App Router page via a thin alias so links in documentation and legacy designs resolve without duplication.
+* Server flow:
+  * Uses `loadViewerOnServer()` and `loadViewerSessionsOnServer()` helpers to invoke the GraphQL client with request cookies/headers.
+  * Redirects unauthenticated viewers to `/login`.
+  * Seeds React Query cache with dehydrated viewer + session queries before rendering.
+* Client flow (`AccountDashboard`):
+  * Hydrates viewer + sessions queries, renders identity overview tiles, and lists active sessions with revoke/sign-out actions.
+  * Calls `/api/auth/logout` for current-session sign out and `/api/auth/sessions/[id]` for remote revocation; both routes proxy GraphQL mutations and manage cookies consistently.
+  * Highlights the current device, presents metadata (device label, IP, risk level) from session payloads, and exposes a mobile drawer with revoke/sign-out actions when screen width is below the `sm` breakpoint.
+
+### Upcoming routes
+At this time there are no additional auth routes blocked. Future UX work will focus on donations, creator onboarding, and admin tooling.
 
 ---
 
@@ -68,6 +91,7 @@ These routes are referenced in the UX but missing page files. Treat them as high
 * Client wrapper: `TrendPotGraphQLClient` in `packages/types/src/graphql-client.ts`.
   * Configures base URL via `NEXT_PUBLIC_API_URL` → `API_BASE_URL` → fallback `http://localhost:4000` (`apps/web/src/lib/api-client.ts`).
   * Enforces JSON content-type, surfaces GraphQL errors, and validates responses with Zod before returning to callers.
+  * Auth helpers: `requestEmailOtp`, `verifyEmailOtp`, `getViewer`, `getViewerSessions`, `logoutSession`, and `revokeSession` now expose GraphQL mutations/queries for platform auth; Next API routes consume these to bridge cookies between Fastify and the browser.
 
 ### Featured challenge pipeline
 1. **Frontend query (React Query)**

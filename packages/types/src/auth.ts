@@ -191,8 +191,35 @@ export const defaultAuthBootstrapContract: AuthBootstrapContract = {
   }
 };
 
+export const viewerSessionSchema = sessionSchema
+  .pick({
+    id: true,
+    userId: true,
+    rolesSnapshot: true,
+    issuedAt: true,
+    expiresAt: true,
+    refreshTokenHash: true,
+    ipAddress: true,
+    userAgent: true,
+    status: true,
+    metadata: true
+  })
+  .extend({
+    deviceLabel: z.string().optional().nullable(),
+    riskLevel: z.string().optional().nullable(),
+  });
+export type ViewerSession = z.infer<typeof viewerSessionSchema>;
+
 export const viewerSchema = z.object({
   user: userSchema.nullable(),
-  session: sessionSchema.nullable()
+  session: viewerSessionSchema.nullable()
 });
 export type Viewer = z.infer<typeof viewerSchema>;
+
+export const emailOtpChallengeSchema = z.object({
+  token: z.string(),
+  expiresAt: z.string(),
+  deliveryHint: z.string()
+});
+export type EmailOtpChallenge = z.infer<typeof emailOtpChallengeSchema>;
+

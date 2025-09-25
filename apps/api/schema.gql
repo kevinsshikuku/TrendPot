@@ -93,11 +93,20 @@ type ViewerUser {
 
 type ViewerSession {
   id: String!
+  userId: String!
+  rolesSnapshot: [String!]!
   issuedAt: DateTime!
   expiresAt: DateTime!
   ipAddress: String
   userAgent: String
   status: String!
+  deviceLabel: String
+  riskLevel: String
+  refreshTokenHash: String!
+  metadata: ViewerSessionMetadata
+}
+
+
 }
 
 type Viewer {
@@ -105,6 +114,11 @@ type Viewer {
   session: ViewerSession
 }
 
+type EmailOtpChallenge {
+  token: String!
+  expiresAt: DateTime!
+  deliveryHint: String!
+}
 input ChallengeListFilterInput {
   status: ChallengeStatus
   search: String
@@ -142,6 +156,19 @@ input ArchiveChallengeInput {
   expectedVersion: Int!
 }
 
+input RequestEmailOtpInput {
+  email: String!
+  displayName: String
+  deviceLabel: String
+}
+
+input VerifyEmailOtpInput {
+  email: String!
+  otpCode: String!
+  token: String!
+  deviceLabel: String
+}
+
 type Query {
   featuredChallenges(status: String, limit: Int): [ChallengeSummary!]!
   challenges(status: String, limit: Int): [ChallengeSummary!]!
@@ -149,12 +176,17 @@ type Query {
   challenge(id: String!): Challenge
   health: Health!
   viewer: Viewer!
+  viewerSessions: [ViewerSession!]!
 }
 
 type Mutation {
   createChallenge(input: CreateChallengeInput!): Challenge!
   updateChallenge(input: UpdateChallengeInput!): Challenge!
   archiveChallenge(input: ArchiveChallengeInput!): Challenge!
+  requestEmailOtp(input: RequestEmailOtpInput!): EmailOtpChallenge!
+  verifyEmailOtp(input: VerifyEmailOtpInput!): Viewer!
+  logoutSession(sessionId: String!): Viewer!
+  revokeSession(sessionId: String!): ViewerSession!
 }
 
 scalar DateTime

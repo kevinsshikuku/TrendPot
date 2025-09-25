@@ -29,6 +29,15 @@ These references satisfy the Foundation Hardening milestone requirement for capt
   - Donation sidebar floats to the right on desktop but anchors beneath the hero on mobile with a persistent donate CTA.
   - Related challenges use a responsive carousel that snaps to three cards on desktop, two on tablets, and one on narrow screens.
 
+## Authentication & Account (`/login`, `/signup`, `/auth/verify`, `/account`)
+
+- **Desktop reference**: https://www.figma.com/file/desktop-auth-trendpot
+- **Mobile reference**: https://www.figma.com/file/mobile-auth-trendpot
+- **Layout notes**:
+  - Auth cards expand to 480px with balanced padding on desktop and collapse to edge-to-edge cards with sticky footers on mobile so CTAs stay visible above the keyboard.
+  - Typography scales from `text-3xl` headings on mobile to `text-4xl` on desktop, with supporting copy stepping up from `text-sm` to `text-base` for readability.
+  - The account dashboard keeps overview tiles in a two-column grid on desktop, shifts to a single column on small screens, and exposes a bottom sheet drawer for session details/actions below the `sm` breakpoint.
+
 ## Implementation Checklist
 
 - All breakpoints align with Tailwind's `sm`, `md`, and `lg` tokens already configured in the project.
