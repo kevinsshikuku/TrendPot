@@ -132,9 +132,9 @@
 
 ## 3. In-House Authentication & Access Control
 - ☐ **Build internal auth service (user store, passwordless/email OTP or similar) with secure session issuance.** _(Owner: Platform)_
-  - Notes:
+  - Notes: 2025-10-05 – AI – Documented Phase 0 auth alignment (roles, permissions, data models) in `docs/design/auth-alignment.md` and shared Zod contracts.
 - ☐ **Enforce role-based guards on GraphQL resolvers and admin routes, including rate limiting.** _(Owner: Backend)_
-  - Notes:
+  - Notes: 2025-10-05 – AI – Introduced auth context parsing, viewer contract, role guard, and rate limiter covering admin GraphQL resolvers with audit logging.
 - ☐ **Restrict CORS to approved origins and introduce Helmet + security headers across API.** _(Owner: Platform)_
   - Notes:
 - ☐ **Produce responsive UX for login/signup/account management (desktop & mobile).** _(Owner: Frontend)_

@@ -4,6 +4,19 @@ enum ChallengeStatus {
   ARCHIVED
 }
 
+enum UserRole {
+  FAN
+  CREATOR
+  OPERATOR
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+  PENDING_VERIFICATION
+}
+
 type ChallengeSummary {
   id: String!
   title: String!
@@ -66,6 +79,32 @@ type Health {
   uptime: Float!
 }
 
+type ViewerUser {
+  id: String!
+  email: String!
+  phone: String
+  displayName: String!
+  roles: [UserRole!]!
+  permissions: [String!]!
+  status: UserStatus!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type ViewerSession {
+  id: String!
+  issuedAt: DateTime!
+  expiresAt: DateTime!
+  ipAddress: String
+  userAgent: String
+  status: String!
+}
+
+type Viewer {
+  user: ViewerUser
+  session: ViewerSession
+}
+
 input ChallengeListFilterInput {
   status: ChallengeStatus
   search: String
@@ -109,6 +148,7 @@ type Query {
   challengeAdminList(input: ChallengeListInput): ChallengeList!
   challenge(id: String!): Challenge
   health: Health!
+  viewer: Viewer!
 }
 
 type Mutation {
