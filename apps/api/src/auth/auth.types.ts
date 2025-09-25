@@ -16,7 +16,6 @@ export interface AuthenticatedSession
     | "status"
     | "metadata"
   > {}
-
 export interface ResolvedAuthContext {
   user: AuthenticatedUser | null;
   session: AuthenticatedSession | null;

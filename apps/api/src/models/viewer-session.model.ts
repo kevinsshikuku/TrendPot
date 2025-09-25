@@ -11,17 +11,16 @@ export class ViewerSessionMetadataModel {
   declare riskLevel?: string | null;
 }
 
+
 @ObjectType("ViewerSession")
 export class ViewerSessionModel {
   @Field()
   declare id: string;
-
   @Field()
   declare userId: string;
 
   @Field(() => [String])
   declare rolesSnapshot: string[];
-
   @Field(() => Date)
   declare issuedAt: Date;
 

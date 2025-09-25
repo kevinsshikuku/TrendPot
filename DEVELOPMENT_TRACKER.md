@@ -140,6 +140,7 @@
 - ☑ **Produce responsive UX for login/signup/account management (desktop & mobile).** _(Owner: Frontend)_
   - Notes: 2025-10-05 – AI – Built App Router flows for login, signup, OTP verification, and the account dashboard using shared UI primitives, responsive layouts, and React Query; wired Next API routes to proxy GraphQL auth mutations, forward cookies, and manage session revocation. 2025-10-06 – AI – Added middleware gatekeeping for `/account` + `/admin`, sticky CTA footers, mobile session drawers, and documented Figma references for auth/account parity in `docs/design/responsive-baselines.md`.
 
+
 ## 4. TikTok Content Ingestion & Presentation
 - ☐ **Implement TikTok Display API OAuth flow, token storage (encrypted), and ingestion workers.** _(Owner: Backend)_
   - Notes:

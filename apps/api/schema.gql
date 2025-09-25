@@ -106,9 +106,7 @@ type ViewerSession {
   metadata: ViewerSessionMetadata
 }
 
-type ViewerSessionMetadata {
-  device: String
-  riskLevel: String
+
 }
 
 type Viewer {
@@ -121,7 +119,6 @@ type EmailOtpChallenge {
   expiresAt: DateTime!
   deliveryHint: String!
 }
-
 input ChallengeListFilterInput {
   status: ChallengeStatus
   search: String

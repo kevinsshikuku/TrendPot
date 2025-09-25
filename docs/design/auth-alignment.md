@@ -118,3 +118,4 @@ Collections follow existing repository guidance: ObjectId foreign keys, referenc
 ## Phase 5 Validation Notes (2025-10-06)
 - Conducted an auth security review confirming OTP entropy (6-digit codes hashed with per-environment HMAC secret and 10 minute TTL), replay protection (single-use factors revoked on successful verification or attempt exhaustion), and refresh token storage (48-byte tokens hashed with SHA-256 + secret salt before persistence).
 - Added end-to-end tests in `apps/api/src/platform-auth.e2e.test.ts` that drive the passwordless flow, assert refresh-token hashing, and verify `RolesGuard` blocks non-admin viewers from `createChallenge` while auditing failures.
+

@@ -308,9 +308,7 @@ export class PlatformAuthService {
       deviceLabel,
       reply
     });
-
     const mappedUser = this.mapUserDocument(user);
-
     await this.appendAuditLog({
       actorId: user.id,
       actorRoles: user.roles,
@@ -461,7 +459,6 @@ export class PlatformAuthService {
       },
       "Session and refresh cookies prepared"
     );
-
     return this.mapSessionDocument(sessionDoc);
   }
 
@@ -570,7 +567,6 @@ export class PlatformAuthService {
       }
     });
   }
-
   private clearSessionCookies(reply: FastifyReply) {
     const secure = process.env.NODE_ENV === "production";
     const baseOptions = {

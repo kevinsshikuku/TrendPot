@@ -13,6 +13,7 @@ import {
 } from "./auth";
 import type { EmailOtpChallenge, Viewer, ViewerSession } from "./auth";
 
+
 export interface TrendPotGraphQLClientOptions {
   baseUrl: string;
   fetchImplementation?: typeof fetch;
@@ -654,6 +655,13 @@ export class TrendPotGraphQLClient {
     });
 
     return result.data;
+  }
+
+  async getViewer(): Promise<Viewer> {
+    return this.executeGraphQL({
+      query: VIEWER_QUERY,
+      parser: (payload) => viewerDataSchema.parse(payload).viewer
+    });
   }
 
   private prepareListVariables(params: ListChallengesParams) {
