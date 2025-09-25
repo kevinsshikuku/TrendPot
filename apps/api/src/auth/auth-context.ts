@@ -1,73 +1,65 @@
-import { Buffer } from "node:buffer";
 import type { FastifyRequest } from "fastify";
 import type { Logger } from "pino";
-import { sessionSchema, userSchema } from "@trendpot/types";
-import { z } from "zod";
 import type { ResolvedAuthContext } from "./auth.types";
+import { PlatformAuthService } from "../platform-auth/platform-auth.service";
 
-const base64PayloadSchema = z
-  .string()
-  .min(1)
-  .transform((value) => {
-    try {
-      const decoded = Buffer.from(value, "base64url").toString("utf8");
-      return JSON.parse(decoded) as unknown;
-    } catch (error) {
-      throw new Error("INVALID_BASE64_JSON");
+const SESSION_COOKIE_NAME = process.env.AUTH_SESSION_COOKIE_NAME ?? "trendpot.sid";
+const REFRESH_COOKIE_NAME = process.env.AUTH_REFRESH_COOKIE_NAME ?? "trendpot.refresh";
+
+const parseCookieHeader = (cookieHeader: string | undefined): Record<string, string> => {
+  if (!cookieHeader || cookieHeader.length === 0) {
+    return {};
+  }
+
+  const entries = cookieHeader.split(";");
+  const values: Record<string, string> = {};
+
+  for (const entry of entries) {
+    const [rawName, ...rest] = entry.split("=");
+    if (!rawName || rest.length === 0) {
+      continue;
     }
-  });
 
-const headersSchema = z.object({
-  user: base64PayloadSchema.optional(),
-  session: base64PayloadSchema.optional()
-});
+    const name = rawName.trim();
+    const value = rest.join("=").trim();
 
-export const resolveAuthContext = (
+    if (name.length > 0) {
+      values[name] = decodeURIComponent(value);
+    }
+  }
+
+  return values;
+};
+
+export const resolveAuthContext = async (
   request: FastifyRequest,
-  logger: Logger
-): ResolvedAuthContext => {
-  const headers = headersSchema.safeParse({
-    user: typeof request.headers["x-trendpot-user"] === "string" ? request.headers["x-trendpot-user"] : undefined,
-    session:
-      typeof request.headers["x-trendpot-session"] === "string" ? request.headers["x-trendpot-session"] : undefined
-  });
+  logger: Logger,
+  authService: PlatformAuthService
+): Promise<ResolvedAuthContext> => {
+  const cookieHeader = typeof request.headers.cookie === "string" ? request.headers.cookie : "";
+  const cookies = parseCookieHeader(cookieHeader);
 
-  let user: ResolvedAuthContext["user"] = null;
-  let session: ResolvedAuthContext["session"] = null;
+  const sessionToken = cookies[SESSION_COOKIE_NAME];
+  const refreshToken = cookies[REFRESH_COOKIE_NAME];
 
-  if (!headers.success) {
-    const reason = headers.error.issues[0]?.message ?? "invalid auth headers";
-    logger.debug({ reason }, "Failed to parse auth headers");
+  if (!sessionToken || sessionToken.length === 0) {
+    logger.debug({ event: "auth.context.session_cookie_missing" }, "No session cookie supplied");
+    return { user: null, session: null };
+  }
+
+  try {
+    const { user, session } = await authService.resolveSessionFromTokens({
+      sessionToken,
+      refreshToken,
+      logger,
+      requestId: String(request.id),
+      ipAddress: request.ip,
+      userAgent: typeof request.headers["user-agent"] === "string" ? request.headers["user-agent"] : undefined
+    });
+
     return { user, session };
+  } catch (error) {
+    logger.error({ error }, "Failed to resolve auth context from session cookie");
+    return { user: null, session: null };
   }
-
-  if (headers.data.user) {
-    try {
-      user = userSchema.parse(headers.data.user);
-    } catch (error) {
-      logger.warn({ error }, "Rejected malformed user payload from auth header");
-    }
-  }
-
-  if (headers.data.session) {
-    try {
-      const parsed = sessionSchema.parse(headers.data.session);
-      session = {
-        id: parsed.id,
-        userId: parsed.userId,
-        rolesSnapshot: parsed.rolesSnapshot,
-        issuedAt: parsed.issuedAt,
-        expiresAt: parsed.expiresAt,
-        refreshTokenHash: parsed.refreshTokenHash,
-        ipAddress: parsed.ipAddress,
-        userAgent: parsed.userAgent,
-        status: parsed.status,
-        metadata: parsed.metadata
-      };
-    } catch (error) {
-      logger.warn({ error }, "Rejected malformed session payload from auth header");
-    }
-  }
-
-  return { user, session };
 };

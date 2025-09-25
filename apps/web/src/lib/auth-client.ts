@@ -21,37 +21,29 @@ async function handleJsonResponse<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-export interface RequestOtpInput {
-  email: string;
-  displayName?: string;
+export interface StartTikTokLoginInput {
+  scopes?: string[];
+  returnPath?: string;
+  redirectUri?: string;
   deviceLabel?: string;
 }
 
-export async function requestEmailOtp(input: RequestOtpInput) {
-  const response = await fetch("/api/auth/request-otp", {
+export async function startTikTokLogin(input?: StartTikTokLoginInput) {
+  const response = await fetch("/api/auth/tiktok/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input)
+    body: JSON.stringify(input ?? {})
   });
 
-  return handleJsonResponse<{ challenge: { token: string; expiresAt: string; deliveryHint: string } }>(response);
-}
-
-export interface VerifyOtpInput {
-  email: string;
-  otpCode: string;
-  token: string;
-  deviceLabel?: string;
-}
-
-export async function verifyEmailOtp(input: VerifyOtpInput) {
-  const response = await fetch("/api/auth/verify-otp", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input)
-  });
-
-  return handleJsonResponse<{ viewer: Viewer }>(response);
+  return handleJsonResponse<{
+    intent: {
+      state: string;
+      clientKey: string;
+      redirectUri: string;
+      scopes: string[];
+      returnPath?: string | null;
+    };
+  }>(response);
 }
 
 export async function fetchViewer() {
@@ -81,4 +73,19 @@ export async function logout(sessionId: string) {
   });
 
   return handleJsonResponse<{ viewer: Viewer }>(response);
+}
+
+export interface UpdateProfileInput {
+  displayName?: string;
+  phone?: string;
+}
+
+export async function updateProfile(input: UpdateProfileInput) {
+  const response = await fetch("/api/auth/profile", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input ?? {})
+  });
+
+  return handleJsonResponse<{ user: NonNullable<Viewer["user"]> }>(response);
 }

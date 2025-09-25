@@ -79,41 +79,29 @@ export const userMetadataSchema = z
         push: z.boolean().optional()
       })
       .optional(),
-    featureFlags: z.record(z.string(), z.boolean()).optional()
+    featureFlags: z.record(z.string(), z.boolean()).optional(),
+    guest: z.boolean().optional(),
+    authOrigin: z.enum(["guest", "tiktok"]).optional()
   })
   .optional();
 
 export const userSchema = z.object({
   id: z.string(),
-  email: z.string().email(),
+  email: z.string().email().nullable(),
   phone: z.string().optional(),
   roles: z.array(userRoleSchema).min(1),
   permissions: z.array(userPermissionSchema).min(1),
   displayName: z.string(),
+  avatarUrl: z.string().optional(),
+  tiktokUserId: z.string().optional(),
+  tiktokUsername: z.string().optional(),
+  tiktokScopes: z.array(z.string()).default([]),
   status: userStatusSchema,
   createdAt: z.string(),
   updatedAt: z.string(),
   metadata: userMetadataSchema
 });
 export type User = z.infer<typeof userSchema>;
-
-export const authFactorTypeSchema = z.enum(["email_otp", "magic_link"]);
-export type AuthFactorType = z.infer<typeof authFactorTypeSchema>;
-
-export const authFactorStatusSchema = z.enum(["active", "consumed", "expired", "revoked"]);
-export type AuthFactorStatus = z.infer<typeof authFactorStatusSchema>;
-
-export const authFactorSchema = z.object({
-  id: z.string(),
-  userId: z.string(),
-  type: authFactorTypeSchema,
-  channel: z.enum(["email", "phone"]),
-  attempts: z.number().int().nonnegative().default(0),
-  expiresAt: z.string(),
-  createdAt: z.string(),
-  status: authFactorStatusSchema
-});
-export type AuthFactor = z.infer<typeof authFactorSchema>;
 
 export const sessionStatusSchema = z.enum(["active", "revoked", "expired"]);
 export type SessionStatus = z.infer<typeof sessionStatusSchema>;
@@ -131,7 +119,8 @@ export const sessionSchema = z.object({
   metadata: z
     .object({
       device: z.string().optional(),
-      riskLevel: z.enum(["low", "medium", "high"]).optional()
+      riskLevel: z.enum(["low", "medium", "high"]).optional(),
+      tiktokOpenId: z.string().optional()
     })
     .optional()
 });
@@ -143,12 +132,10 @@ export type AuditLogSeverity = z.infer<typeof auditLogSeveritySchema>;
 export const auditLogActionSchema = z.enum([
   "auth.login",
   "auth.logout",
-  "auth.factor.enroll",
-  "auth.factor.challenge",
-  "auth.factor.verify",
   "auth.session.issue",
   "auth.session.refresh",
   "auth.session.revoke",
+  "auth.profile.update",
   "security.settings.update",
   "security.rate_limit.update"
 ]);
@@ -207,6 +194,7 @@ export const viewerSessionSchema = sessionSchema
   .extend({
     deviceLabel: z.string().optional().nullable(),
     riskLevel: z.string().optional().nullable(),
+    tiktokOpenId: z.string().optional().nullable()
   });
 export type ViewerSession = z.infer<typeof viewerSessionSchema>;
 
@@ -216,10 +204,12 @@ export const viewerSchema = z.object({
 });
 export type Viewer = z.infer<typeof viewerSchema>;
 
-export const emailOtpChallengeSchema = z.object({
-  token: z.string(),
-  expiresAt: z.string(),
-  deliveryHint: z.string()
+export const tiktokLoginIntentSchema = z.object({
+  state: z.string(),
+  clientKey: z.string(),
+  redirectUri: z.string(),
+  scopes: z.array(z.string()),
+  returnPath: z.string().nullable().optional()
 });
-export type EmailOtpChallenge = z.infer<typeof emailOtpChallengeSchema>;
+export type TikTokLoginIntent = z.infer<typeof tiktokLoginIntentSchema>;
 

@@ -1,7 +1,6 @@
 import { cookies } from "next/headers";
 import type { Viewer } from "@trendpot/types";
 import { apiClient } from "./api-client";
-import { headersFromCookieHeader } from "./auth-headers";
 
 function buildCookieHeader(): string {
   const store = cookies();
@@ -11,14 +10,12 @@ function buildCookieHeader(): string {
 
 export async function loadViewerOnServer(): Promise<Viewer> {
   const cookieHeader = buildCookieHeader();
-  const authHeaders = headersFromCookieHeader(cookieHeader);
 
   return apiClient.getViewer({
     init: {
       headers: {
         Cookie: cookieHeader,
-        "x-requested-with": "nextjs",
-        ...authHeaders
+        "x-requested-with": "nextjs"
       }
     }
   });
@@ -26,14 +23,12 @@ export async function loadViewerOnServer(): Promise<Viewer> {
 
 export async function loadViewerSessionsOnServer() {
   const cookieHeader = buildCookieHeader();
-  const authHeaders = headersFromCookieHeader(cookieHeader);
 
   return apiClient.getViewerSessions({
     init: {
       headers: {
         Cookie: cookieHeader,
-        "x-requested-with": "nextjs",
-        ...authHeaders
+        "x-requested-with": "nextjs"
       }
     }
   });

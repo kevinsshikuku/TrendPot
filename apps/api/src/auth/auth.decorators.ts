@@ -14,3 +14,10 @@ export interface RateLimitOptions {
 }
 
 export const RateLimit = (options: RateLimitOptions) => SetMetadata(RATE_LIMIT_KEY, options);
+
+export const PROFILE_FIELDS_KEY = Symbol("profile_fields");
+
+export type ProfileFieldRequirement = "displayName" | "phone";
+
+export const RequireProfileFields = (...fields: ProfileFieldRequirement[]) =>
+  SetMetadata(PROFILE_FIELDS_KEY, fields);

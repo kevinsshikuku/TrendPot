@@ -1,4 +1,12 @@
-import { randomBytes, randomInt, timingSafeEqual, createHmac, createHash } from "node:crypto";
+import {
+  createCipheriv,
+  createHash,
+  createHmac,
+  randomBytes,
+  randomInt,
+  timingSafeEqual
+} from "node:crypto";
+import { URLSearchParams } from "node:url";
 import { Injectable, UnauthorizedException, BadRequestException } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import type { FastifyReply } from "fastify";
@@ -14,25 +22,29 @@ import type {
   UserRole
 } from "@trendpot/types";
 import { rolePermissions } from "@trendpot/types";
-import { AuthEmailService } from "./email.service";
 import type { AuditLogDocument } from "./schemas/audit-log.schema";
 import { AuditLogEntity } from "./schemas/audit-log.schema";
-import type { AuthFactorDocument } from "./schemas/auth-factor.schema";
-import { AuthFactorEntity } from "./schemas/auth-factor.schema";
 import type { SessionDocument } from "./schemas/session.schema";
 import { SessionEntity } from "./schemas/session.schema";
 import type { UserDocument } from "./schemas/user.schema";
 import { UserEntity } from "./schemas/user.schema";
 import { RateLimitService } from "../auth/rate-limit.service";
 import { AuthAuditService } from "../auth/auth-audit.service";
+import { RedisService } from "../redis/redis.service";
 
-const OTP_WINDOW_MINUTES = Number(process.env.AUTH_OTP_WINDOW_MINUTES ?? 10);
-const OTP_ATTEMPT_LIMIT = Number(process.env.AUTH_OTP_ATTEMPT_LIMIT ?? 5);
 const SESSION_TTL_HOURS = Number(process.env.AUTH_SESSION_TTL_HOURS ?? 24);
 const REFRESH_TTL_DAYS = Number(process.env.AUTH_REFRESH_TTL_DAYS ?? 14);
 const SESSION_COOKIE_NAME = process.env.AUTH_SESSION_COOKIE_NAME ?? "trendpot.sid";
 const REFRESH_COOKIE_NAME = process.env.AUTH_REFRESH_COOKIE_NAME ?? "trendpot.refresh";
 const COOKIE_DOMAIN = process.env.AUTH_COOKIE_DOMAIN;
+const TIKTOK_CLIENT_KEY = process.env.TIKTOK_CLIENT_KEY ?? "";
+const TIKTOK_CLIENT_SECRET = process.env.TIKTOK_CLIENT_SECRET ?? "";
+const TIKTOK_REDIRECT_URI = process.env.TIKTOK_REDIRECT_URI ?? "";
+const TIKTOK_TOKEN_ENDPOINT = process.env.TIKTOK_TOKEN_ENDPOINT ??
+  "https://open-api.tiktok.com/oauth/access_token/";
+const TIKTOK_PROFILE_ENDPOINT = process.env.TIKTOK_PROFILE_ENDPOINT ??
+  "https://open-api.tiktok.com/user/info/";
+const TIKTOK_STATE_TTL_SECONDS = Number(process.env.TIKTOK_STATE_TTL_SECONDS ?? 600);
 
 interface RequestContextMetadata {
   logger: Logger;
@@ -43,16 +55,29 @@ interface RequestContextMetadata {
   reply?: FastifyReply;
 }
 
-interface IssueOtpParams extends RequestContextMetadata {
-  email: string;
-  displayName?: string;
-  deviceLabel?: string;
+interface TikTokLoginIntentParams extends RequestContextMetadata {
+  scopes?: string[];
+  returnPath?: string;
+  redirectUri?: string;
 }
 
-interface VerifyOtpParams extends RequestContextMetadata {
-  email: string;
-  otpCode: string;
-  token: string;
+interface TikTokLoginIntentResult {
+  state: string;
+  clientKey: string;
+  redirectUri: string;
+  scopes: string[];
+  returnPath?: string;
+}
+
+interface TikTokLoginCompletionParams extends RequestContextMetadata {
+  code: string;
+  state: string;
+}
+
+interface TikTokLoginResult {
+  session: Session;
+  user: User;
+  redirectPath?: string;
 }
 
 interface RevokeSessionParams extends RequestContextMetadata {
@@ -69,235 +94,227 @@ type SessionTokenPayload = {
   issuedAt: string;
 };
 
-type OtpTokenPayload = {
-  factorId: string;
-  userId: string;
-  expiresAt: number;
-  nonce: string;
+type TikTokStateRecord = {
+  redirectUri: string;
+  scopes: string[];
+  returnPath?: string;
+  deviceLabel?: string;
 };
 
-interface VerifyOtpResult {
-  session: Session;
-  user: User;
+type TikTokTokenExchange = {
+  accessToken: string;
+  refreshToken: string;
+  openId: string;
+  expiresIn: number;
+  refreshExpiresIn: number;
+  scope: string[];
+};
+
+type TikTokProfile = {
+  displayName?: string;
+  username?: string;
+  avatarUrl?: string;
+};
+
+interface EncryptedSecret {
+  ciphertext: string;
+  iv: string;
+  authTag: string;
 }
+
+const DEFAULT_TIKTOK_SCOPES = ["user.info.basic"];
 
 @Injectable()
 export class PlatformAuthService {
-  private readonly otpHashSecret = process.env.AUTH_OTP_HASH_SECRET ?? "trendpot-dev-otp-hash";
-  private readonly otpTokenSecret = process.env.AUTH_OTP_TOKEN_SECRET ?? "trendpot-dev-otp-token";
   private readonly sessionTokenSecret =
     process.env.AUTH_SESSION_TOKEN_SECRET ?? "trendpot-dev-session-token";
   private readonly refreshHashSecret = process.env.AUTH_REFRESH_HASH_SECRET ?? "trendpot-dev-refresh";
+  private readonly tiktokEncryptionKey: Buffer;
+  private readonly tiktokKeyId = process.env.TIKTOK_TOKEN_ENC_KEY_ID ?? "local-dev";
 
   constructor(
     @InjectModel(UserEntity.name) private readonly userModel: Model<UserDocument>,
-    @InjectModel(AuthFactorEntity.name)
-    private readonly authFactorModel: Model<AuthFactorDocument>,
     @InjectModel(SessionEntity.name) private readonly sessionModel: Model<SessionDocument>,
-    @InjectModel(AuditLogEntity.name)
-    private readonly auditLogModel: Model<AuditLogDocument>,
-    private readonly emailService: AuthEmailService,
+    @InjectModel(AuditLogEntity.name) private readonly auditLogModel: Model<AuditLogDocument>,
     private readonly rateLimitService: RateLimitService,
-    private readonly auditService: AuthAuditService
-  ) {}
+    private readonly auditService: AuthAuditService,
+    private readonly redisService: RedisService
+  ) {
+    const providedKey = process.env.TIKTOK_TOKEN_ENC_KEY;
+    if (providedKey) {
+      const buffer = Buffer.from(providedKey, "base64");
+      if (buffer.length !== 32) {
+        throw new Error("TIKTOK_TOKEN_ENC_KEY must be a 32-byte base64 string");
+      }
+      this.tiktokEncryptionKey = buffer;
+    } else {
+      this.tiktokEncryptionKey = createHash("sha256")
+        .update(process.env.AUTH_SESSION_TOKEN_SECRET ?? "trendpot-dev-session-token")
+        .digest();
+    }
+  }
 
-  async issueEmailOtp(params: IssueOtpParams) {
-    const { email, displayName, logger, requestId, ipAddress, userAgent } = params;
-    const normalizedEmail = email.trim().toLowerCase();
+  async createTikTokLoginIntent(params: TikTokLoginIntentParams): Promise<TikTokLoginIntentResult> {
+    const { logger, requestId, ipAddress, scopes, returnPath, redirectUri, deviceLabel } = params;
 
-    const rateLimitKey = `auth:otp:${normalizedEmail}`;
-    const { allowed, retryAt } = this.rateLimitService.consume(rateLimitKey, {
-      windowMs: OTP_WINDOW_MINUTES * 60_000,
-      max: Number(process.env.AUTH_OTP_MAX_REQUESTS ?? 5)
-    });
+    const normalizedScopes = Array.isArray(scopes) && scopes.length > 0 ? scopes : DEFAULT_TIKTOK_SCOPES;
+    const resolvedRedirectUri = redirectUri ?? TIKTOK_REDIRECT_URI;
 
-    if (!allowed) {
+    if (!TIKTOK_CLIENT_KEY || !TIKTOK_CLIENT_SECRET || !resolvedRedirectUri) {
+      throw new BadRequestException("TikTok OAuth is not configured correctly");
+    }
+
+    const rateLimitIdentifier = `auth:tiktok:intent:${ipAddress ?? "unknown"}`;
+    const rateResult = await this.rateLimitService.consume(rateLimitIdentifier, { windowMs: 60_000, max: 20 });
+
+    if (!rateResult.allowed) {
       this.auditService.recordRateLimitViolation({
         requestId,
-        operation: "issueEmailOtp",
-        reason: "otp_rate_limited",
+        operation: "createTikTokLoginIntent",
+        reason: "rate_limited",
         logger,
         ipAddress,
-        retryAt
+        retryAt: rateResult.retryAt
       });
-      throw new BadRequestException("Too many OTP requests. Please try again later.");
+      throw new BadRequestException("Too many login attempts. Please try again later.");
     }
 
-    let user = await this.userModel.findOne({ email: normalizedEmail }).exec();
+    const state = randomBytes(16).toString("hex");
+    const redisKey = this.buildStateKey(state);
+    const statePayload: TikTokStateRecord = {
+      redirectUri: resolvedRedirectUri,
+      scopes: normalizedScopes,
+      returnPath,
+      deviceLabel
+    };
 
-    if (!user) {
-      user = await this.userModel.create({
-        email: normalizedEmail,
-        displayName: displayName ?? normalizedEmail.split("@")[0],
-        roles: ["fan"],
-        status: "pending_verification",
-        metadata: {},
-        audit: {}
-      });
+    const client = this.redisService.getClient();
+    await client.set(redisKey, JSON.stringify(statePayload), "EX", TIKTOK_STATE_TTL_SECONDS);
 
-      await this.appendAuditLog({
-        actorId: user.id,
-        actorRoles: user.roles,
-        action: "auth.factor.enroll",
-        severity: "info",
+    logger.info(
+      {
+        event: "auth.tiktok.intent_created",
+        state,
         requestId,
         ipAddress,
-        userAgent,
-        summary: `Seeded user via OTP request for ${normalizedEmail}`
+        scopes: normalizedScopes
+      },
+      "Issued TikTok login intent"
+    );
+
+    return {
+      state,
+      clientKey: TIKTOK_CLIENT_KEY,
+      redirectUri: resolvedRedirectUri,
+      scopes: normalizedScopes,
+      returnPath
+    };
+  }
+
+  async completeTikTokLogin(params: TikTokLoginCompletionParams): Promise<TikTokLoginResult> {
+    const { code, state, logger, requestId, ipAddress, userAgent, reply } = params;
+
+    const client = this.redisService.getClient();
+    const redisKey = this.buildStateKey(state);
+    const serialized = await client.get(redisKey);
+
+    if (!serialized) {
+      this.auditService.recordAuthorizationFailure({
+        requestId,
+        operation: "completeTikTokLogin",
+        reason: "state_not_found",
+        logger,
+        ipAddress
       });
-    } else if (user.status === "disabled") {
-      logger.warn(
-        {
-          event: "auth.email_otp.rejected",
-          reason: "user_disabled",
-          userId: user.id,
-          requestId,
-          ipAddress
-        },
-        "OTP request rejected because user is disabled"
-      );
-      throw new UnauthorizedException("Account is disabled. Please contact support.");
+      throw new UnauthorizedException("TikTok login session has expired. Please start again.");
     }
 
-    const otpCode = this.generateOtpCode();
-    const expiresAt = new Date(Date.now() + OTP_WINDOW_MINUTES * 60_000);
-    const secretHash = this.hashOtp(otpCode);
+    await client.del(redisKey);
+    const stateRecord = JSON.parse(serialized) as TikTokStateRecord;
 
-    const factor = await this.authFactorModel.create({
-      userId: user._id,
-      type: "email_otp",
-      channel: "email",
-      secretHash,
-      attempts: 0,
-      expiresAt,
-      status: "active"
-    });
-
-    const token = this.signOtpToken({
-      factorId: factor.id,
-      userId: user.id,
-      expiresAt: expiresAt.getTime(),
-      nonce: randomBytes(16).toString("base64url")
-    });
-
-    await this.emailService.sendOtpEmail({
-      email: normalizedEmail,
-      otpCode,
-      token,
-      expiresAt,
+    const tokenExchange = await this.exchangeTikTokCode({
+      code,
+      redirectUri: stateRecord.redirectUri,
       logger,
-      requestId
+      requestId,
+      ipAddress
+    });
+
+    const profile = await this.fetchTikTokProfile({
+      accessToken: tokenExchange.accessToken,
+      openId: tokenExchange.openId,
+      logger,
+      requestId,
+      ipAddress
+    });
+
+    const user = await this.upsertTikTokUser({
+      profile,
+      tokenExchange,
+      logger,
+      requestId,
+      ipAddress,
+      userAgent
+    });
+
+    const session = await this.issueSession({
+      user,
+      logger,
+      requestId,
+      ipAddress,
+      userAgent,
+      deviceLabel: stateRecord.deviceLabel,
+      reply,
+      tiktokOpenId: tokenExchange.openId
     });
 
     await this.appendAuditLog({
       actorId: user.id,
       actorRoles: user.roles,
-      action: "auth.factor.challenge",
+      action: "auth.login",
       severity: "info",
       requestId,
       ipAddress,
       userAgent,
-      summary: `Issued email OTP via transactional stub for ${normalizedEmail}`
+      summary: `TikTok login completed for ${user.displayName}`
     });
-
-    await this.userModel
-      .updateOne(
-        { _id: user.id },
-        {
-          $set: {
-            "audit.lastOtpAt": new Date(),
-            "audit.lastOtpIpAddress": ipAddress,
-            "audit.lastOtpUserAgent": userAgent
-          }
-        }
-      )
-      .exec();
 
     logger.info(
       {
-        event: "auth.email_otp.issued",
-        userId: user.id,
-        factorId: factor.id,
-        expiresAt: expiresAt.toISOString(),
+        event: "auth.tiktok.login_complete",
         requestId,
-        ipAddress
+        userId: user.id,
+        sessionId: session.id,
+        openId: tokenExchange.openId
       },
-      "Email OTP issued"
+      "TikTok login complete"
     );
 
-    return { token, expiresAt };
+    return {
+      session,
+      user,
+      redirectPath: stateRecord.returnPath
+    };
   }
 
-  async verifyEmailOtp(params: VerifyOtpParams): Promise<VerifyOtpResult> {
-    const { email, otpCode, token, logger, requestId, ipAddress, userAgent, deviceLabel, reply } = params;
-    const normalizedEmail = email.trim().toLowerCase();
+  async createGuestSession(params: {
+    displayName?: string;
+    deviceLabel?: string;
+  } & RequestContextMetadata): Promise<TikTokLoginResult> {
+    const { displayName, deviceLabel, logger, requestId, ipAddress, userAgent, reply } = params;
 
-    const payload = this.verifyOtpToken(token);
+    const trimmed = typeof displayName === "string" ? displayName.trim() : "";
+    const guestDisplayName = trimmed.length > 0 ? trimmed : `Guest ${randomInt(1000, 9999)}`;
 
-    if (!payload) {
-      this.auditService.recordAuthorizationFailure({
-        requestId,
-        operation: "verifyEmailOtp",
-        reason: "invalid_token",
-        logger,
-        ipAddress
-      });
-      throw new UnauthorizedException("Invalid or expired OTP token.");
-    }
-
-    if (payload.expiresAt < Date.now()) {
-      await this.authFactorModel.updateOne({ _id: payload.factorId }, { status: "expired" }).exec();
-      throw new UnauthorizedException("OTP has expired. Please request a new code.");
-    }
-
-    const factor = await this.authFactorModel.findById(payload.factorId).exec();
-
-    if (!factor || factor.status !== "active") {
-      throw new UnauthorizedException("OTP is no longer valid. Please request a new code.");
-    }
-
-    const user = await this.userModel.findOne({ _id: factor.userId, email: normalizedEmail }).exec();
-
-    if (!user) {
-      throw new UnauthorizedException("Account not found for provided OTP.");
-    }
-
-    if (factor.attempts >= OTP_ATTEMPT_LIMIT) {
-      await this.authFactorModel
-        .updateOne({ _id: factor.id }, { status: "revoked" })
-        .exec();
-      throw new UnauthorizedException("Too many invalid attempts. Please request a new code.");
-    }
-
-    const providedHash = this.hashOtp(otpCode);
-    const storedHashBuffer = Buffer.from(factor.secretHash, "hex");
-    const providedHashBuffer = Buffer.from(providedHash, "hex");
-
-    if (
-      storedHashBuffer.length !== providedHashBuffer.length ||
-      !timingSafeEqual(storedHashBuffer, providedHashBuffer)
-    ) {
-      await this.authFactorModel
-        .updateOne({ _id: factor.id }, { $inc: { attempts: 1 } })
-        .exec();
-      throw new UnauthorizedException("Invalid OTP code. Please try again.");
-    }
-
-    await this.authFactorModel
-      .updateOne({ _id: factor.id }, { status: "consumed", attempts: factor.attempts + 1 })
-      .exec();
-
-    await this.userModel
-      .updateOne(
-        { _id: user.id },
-        {
-          $set: {
-            status: "active",
-            "audit.lastLoginAt": new Date()
-          }
-        }
-      )
-      .exec();
+    const user = await this.userModel.create({
+      email: null,
+      displayName: guestDisplayName,
+      roles: ["fan"],
+      status: "active",
+      metadata: { authOrigin: "guest", guest: true },
+      audit: { lastLoginAt: new Date() },
+      tiktokScopes: []
+    });
 
     const session = await this.issueSession({
       user,
@@ -306,9 +323,10 @@ export class PlatformAuthService {
       ipAddress,
       userAgent,
       deviceLabel,
-      reply
+      reply,
+      tiktokOpenId: undefined
     });
-    const mappedUser = this.mapUserDocument(user);
+
     await this.appendAuditLog({
       actorId: user.id,
       actorRoles: user.roles,
@@ -317,70 +335,287 @@ export class PlatformAuthService {
       requestId,
       ipAddress,
       userAgent,
-      summary: `Issued session ${session.id} for ${normalizedEmail}`
+      summary: `Bootstrapped guest session ${session.id}`
     });
 
     logger.info(
       {
-        event: "auth.session.issued",
+        event: "auth.session.guest_issued",
         sessionId: session.id,
         userId: user.id,
         requestId,
-        expiresAt: session.expiresAt,
         ipAddress
       },
-      "Session issued after OTP verification"
+      "Guest session issued"
     );
 
     return {
       session,
-      user: mappedUser
+      user: this.mapUserDocument(user)
     };
   }
 
-  private generateOtpCode() {
-    return String(randomInt(0, 1_000_000)).padStart(6, "0");
+  private buildStateKey(state: string) {
+    return `tiktok:state:${state}`;
   }
 
-  private hashOtp(otpCode: string) {
-    return createHmac("sha256", this.otpHashSecret).update(otpCode).digest("hex");
-  }
+  private async exchangeTikTokCode(params: {
+    code: string;
+    redirectUri: string;
+    logger: Logger;
+    requestId: string;
+    ipAddress?: string;
+  }): Promise<TikTokTokenExchange> {
+    const { code, redirectUri, logger, requestId, ipAddress } = params;
 
-  private signOtpToken(payload: OtpTokenPayload) {
-    const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
-    const signature = createHmac("sha256", this.otpTokenSecret).update(encoded).digest("base64url");
-    return `${encoded}.${signature}`;
-  }
+    const body = new URLSearchParams({
+      client_key: TIKTOK_CLIENT_KEY,
+      client_secret: TIKTOK_CLIENT_SECRET,
+      code,
+      grant_type: "authorization_code",
+      redirect_uri: redirectUri
+    });
 
-  private verifyOtpToken(token: string): OtpTokenPayload | null {
-    const [encoded, signature] = token.split(".");
-    if (!encoded || !signature) {
-      return null;
+    const response = await fetch(TIKTOK_TOKEN_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body
+    });
+
+    if (!response.ok) {
+      logger.error(
+        {
+          event: "auth.tiktok.token_exchange_failed",
+          status: response.status,
+          requestId,
+          ipAddress
+        },
+        "TikTok token exchange failed"
+      );
+      throw new UnauthorizedException("TikTok authorization failed");
     }
 
-    const expected = createHmac("sha256", this.otpTokenSecret).update(encoded).digest("base64url");
+    const payload = (await response.json()) as {
+      data?: {
+        access_token: string;
+        refresh_token: string;
+        scope: string;
+        expires_in: number;
+        refresh_expires_in: number;
+        open_id: string;
+      };
+      error?: string;
+      message?: string;
+    };
 
-    const provided = Buffer.from(signature);
-    const expectedBuffer = Buffer.from(expected);
-
-    if (provided.length !== expectedBuffer.length || !timingSafeEqual(provided, expectedBuffer)) {
-      return null;
+    if (!payload?.data || payload.error) {
+      logger.error(
+        {
+          event: "auth.tiktok.token_exchange_error",
+          requestId,
+          ipAddress,
+          error: payload?.error,
+          message: payload?.message
+        },
+        "TikTok token exchange returned error"
+      );
+      throw new UnauthorizedException("TikTok authorization failed");
     }
+
+    const scopes = payload.data.scope ? payload.data.scope.split(",").map((scope) => scope.trim()) : [];
+
+    return {
+      accessToken: payload.data.access_token,
+      refreshToken: payload.data.refresh_token,
+      openId: payload.data.open_id,
+      expiresIn: payload.data.expires_in,
+      refreshExpiresIn: payload.data.refresh_expires_in,
+      scope: scopes
+    };
+  }
+
+  private async fetchTikTokProfile(params: {
+    accessToken: string;
+    openId: string;
+    logger: Logger;
+    requestId: string;
+    ipAddress?: string;
+  }): Promise<TikTokProfile> {
+    const { accessToken, openId, logger, requestId, ipAddress } = params;
 
     try {
-      const decoded = Buffer.from(encoded, "base64url").toString("utf8");
-      const payload = JSON.parse(decoded) as OtpTokenPayload;
-      return payload;
-    } catch {
-      return null;
+      const response = await fetch(TIKTOK_PROFILE_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          open_id: openId,
+          fields: ["display_name", "avatar_url", "username"]
+        })
+      });
+
+      if (!response.ok) {
+        logger.warn(
+          {
+            event: "auth.tiktok.profile_fetch_failed",
+            status: response.status,
+            requestId,
+            ipAddress
+          },
+          "Failed to fetch TikTok profile"
+        );
+        return {};
+      }
+
+      const payload = (await response.json()) as {
+        data?: {
+          user?: {
+            display_name?: string;
+            avatar_url?: string;
+            username?: string;
+          };
+        };
+      };
+
+      return {
+        displayName: payload?.data?.user?.display_name,
+        avatarUrl: payload?.data?.user?.avatar_url,
+        username: payload?.data?.user?.username
+      };
+    } catch (error) {
+      logger.error({ event: "auth.tiktok.profile_fetch_error", error, requestId }, "TikTok profile fetch error");
+      return {};
     }
+  }
+
+  private encryptSecret(plaintext: string): EncryptedSecret {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", this.tiktokEncryptionKey, iv);
+    const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+    const authTag = cipher.getAuthTag();
+
+    return {
+      ciphertext: ciphertext.toString("base64"),
+      iv: iv.toString("base64"),
+      authTag: authTag.toString("base64")
+    };
+  }
+
+  private async upsertTikTokUser(params: {
+    profile: TikTokProfile;
+    tokenExchange: TikTokTokenExchange;
+    logger: Logger;
+    requestId: string;
+    ipAddress?: string;
+    userAgent?: string;
+  }): Promise<UserDocument> {
+    const { profile, tokenExchange, logger, requestId, ipAddress, userAgent } = params;
+
+    const now = new Date();
+    const encryptedAccess = this.encryptSecret(tokenExchange.accessToken);
+    const encryptedRefresh = this.encryptSecret(tokenExchange.refreshToken);
+
+    const update = {
+      displayName: profile.displayName ?? "TikTok User",
+      avatarUrl: profile.avatarUrl ?? undefined,
+      tiktokUsername: profile.username ?? undefined,
+      tiktokUserId: tokenExchange.openId,
+      tiktokScopes: tokenExchange.scope,
+      status: "active" as const,
+      metadata: {
+        authOrigin: "tiktok",
+        guest: false
+      },
+      audit: {
+        lastLoginAt: now
+      },
+      tiktokAuth: {
+        keyId: this.tiktokKeyId,
+        accessToken: encryptedAccess.ciphertext,
+        accessTokenIv: encryptedAccess.iv,
+        accessTokenTag: encryptedAccess.authTag,
+        refreshToken: encryptedRefresh.ciphertext,
+        refreshTokenIv: encryptedRefresh.iv,
+        refreshTokenTag: encryptedRefresh.authTag,
+        accessTokenExpiresAt: new Date(Date.now() + tokenExchange.expiresIn * 1000),
+        refreshTokenExpiresAt: new Date(Date.now() + tokenExchange.refreshExpiresIn * 1000),
+        scope: tokenExchange.scope
+      }
+    };
+
+    let user = await this.userModel.findOne({ tiktokUserId: tokenExchange.openId }).exec();
+
+    if (user) {
+      await this.userModel
+        .updateOne(
+          { _id: user._id },
+          {
+            $set: {
+              displayName: update.displayName,
+              avatarUrl: update.avatarUrl,
+              tiktokUsername: update.tiktokUsername,
+              tiktokScopes: update.tiktokScopes,
+              status: update.status,
+              metadata: update.metadata,
+              "audit.lastLoginAt": now,
+              tiktokAuth: update.tiktokAuth
+            }
+          }
+        )
+        .exec();
+
+      user = await this.userModel.findById(user._id).exec();
+      if (!user) {
+        throw new UnauthorizedException("Failed to load account after TikTok login");
+      }
+      return user;
+    }
+
+    user = await this.userModel.create({
+      email: null,
+      displayName: update.displayName,
+      avatarUrl: update.avatarUrl,
+      tiktokUsername: update.tiktokUsername,
+      tiktokUserId: tokenExchange.openId,
+      tiktokScopes: tokenExchange.scope,
+      roles: ["fan"],
+      status: "active",
+      metadata: update.metadata,
+      audit: { lastLoginAt: now },
+      tiktokAuth: update.tiktokAuth
+    });
+
+    await this.appendAuditLog({
+      actorId: user.id,
+      actorRoles: user.roles,
+      action: "auth.session.issue",
+      severity: "info",
+      requestId,
+      ipAddress,
+      userAgent,
+      summary: `Created new user via TikTok login (${tokenExchange.openId})`
+    });
+
+    logger.info(
+      {
+        event: "auth.tiktok.user_created",
+        requestId,
+        userId: user.id,
+        openId: tokenExchange.openId
+      },
+      "Created user from TikTok profile"
+    );
+
+    return user;
   }
 
   private signSessionToken(payload: SessionTokenPayload) {
     const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
-    const signature = createHmac("sha256", this.sessionTokenSecret)
-      .update(encoded)
-      .digest("base64url");
+    const signature = createHmac("sha256", this.sessionTokenSecret).update(encoded).digest("base64url");
     return `${encoded}.${signature}`;
   }
 
@@ -388,6 +623,136 @@ export class PlatformAuthService {
     return createHash("sha256")
       .update(`${refreshToken}:${this.refreshHashSecret}`)
       .digest("hex");
+  }
+
+  private verifySessionToken(token: string): SessionTokenPayload | null {
+    const [encoded, signature] = token.split(".");
+    if (!encoded || !signature) {
+      return null;
+    }
+
+    const expectedSignature = createHmac("sha256", this.sessionTokenSecret)
+      .update(encoded)
+      .digest("base64url");
+
+    const provided = Buffer.from(signature);
+    const expected = Buffer.from(expectedSignature);
+
+    if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
+      return null;
+    }
+
+    try {
+      const decoded = Buffer.from(encoded, "base64url").toString("utf8");
+      const payload = JSON.parse(decoded) as SessionTokenPayload;
+      return payload;
+    } catch {
+      return null;
+    }
+  }
+
+  async resolveSessionFromTokens(params: {
+    sessionToken: string;
+    refreshToken?: string | null;
+    logger: Logger;
+    requestId: string;
+    ipAddress?: string;
+    userAgent?: string;
+  }): Promise<{ session: Session | null; user: User | null }> {
+    const { sessionToken, refreshToken, logger, requestId, ipAddress, userAgent } = params;
+
+    const payload = this.verifySessionToken(sessionToken);
+
+    if (!payload) {
+      logger.debug(
+        { event: "auth.session.token_invalid", requestId, ipAddress, userAgent },
+        "Rejected session token with invalid signature"
+      );
+      return { session: null, user: null };
+    }
+
+    const sessionDoc = await this.sessionModel
+      .findOne({ _id: payload.sessionId, userId: payload.userId })
+      .exec();
+
+    if (!sessionDoc) {
+      logger.debug(
+        { event: "auth.session.not_found", sessionId: payload.sessionId, requestId, ipAddress, userAgent },
+        "No matching session found for supplied token"
+      );
+      return { session: null, user: null };
+    }
+
+    if (sessionDoc.status !== "active") {
+      logger.debug(
+        {
+          event: "auth.session.inactive",
+          sessionId: sessionDoc.id,
+          status: sessionDoc.status,
+          requestId,
+          ipAddress,
+          userAgent
+        },
+        "Session no longer active"
+      );
+      return { session: null, user: null };
+    }
+
+    if (sessionDoc.expiresAt.getTime() <= Date.now()) {
+      sessionDoc.status = "expired";
+      await sessionDoc.save();
+      logger.debug(
+        {
+          event: "auth.session.expired",
+          sessionId: sessionDoc.id,
+          requestId,
+          ipAddress,
+          userAgent
+        },
+        "Session expired"
+      );
+      return { session: null, user: null };
+    }
+
+    if (refreshToken) {
+      const expectedHash = this.hashRefreshToken(refreshToken);
+      if (expectedHash !== sessionDoc.refreshTokenHash) {
+        logger.warn(
+          {
+            event: "auth.session.refresh_mismatch",
+            sessionId: sessionDoc.id,
+            requestId,
+            ipAddress,
+            userAgent
+          },
+          "Refresh token mismatch"
+        );
+        return { session: null, user: null };
+      }
+    }
+
+    const userDoc = await this.userModel.findById(sessionDoc.userId).exec();
+
+    if (!userDoc) {
+      logger.debug(
+        { event: "auth.session.user_missing", sessionId: sessionDoc.id, requestId, ipAddress, userAgent },
+        "User linked to session no longer exists"
+      );
+      return { session: null, user: null };
+    }
+
+    if (userDoc.status === "disabled") {
+      logger.debug(
+        { event: "auth.session.user_disabled", sessionId: sessionDoc.id, requestId, ipAddress, userAgent },
+        "User linked to session is disabled"
+      );
+      return { session: null, user: null };
+    }
+
+    return {
+      session: this.mapSessionDocument(sessionDoc),
+      user: this.mapUserDocument(userDoc)
+    };
   }
 
   private async issueSession(params: {
@@ -398,8 +763,9 @@ export class PlatformAuthService {
     userAgent?: string;
     deviceLabel?: string;
     reply?: FastifyReply;
+    tiktokOpenId?: string;
   }): Promise<Session> {
-    const { user, logger, requestId, ipAddress, userAgent, deviceLabel, reply } = params;
+    const { user, logger, requestId, ipAddress, userAgent, deviceLabel, reply, tiktokOpenId } = params;
 
     const issuedAt = new Date();
     const expiresAt = new Date(issuedAt.getTime() + SESSION_TTL_HOURS * 3_600_000);
@@ -419,7 +785,8 @@ export class PlatformAuthService {
       status: "active",
       metadata: {
         device: deviceLabel,
-        riskLevel: "low"
+        riskLevel: "low",
+        tiktokOpenId: tiktokOpenId ?? undefined
       }
     });
 
@@ -532,6 +899,73 @@ export class PlatformAuthService {
     return this.revokeSession(params);
   }
 
+  async updateViewerProfile(params: {
+    userId: string;
+    actorRoles: UserRole[];
+    displayName?: string;
+    phone?: string;
+    logger: Logger;
+    requestId: string;
+    ipAddress?: string;
+    userAgent?: string;
+  }): Promise<User> {
+    const { userId, actorRoles, displayName, phone, logger, requestId, ipAddress, userAgent } = params;
+
+    const updates: Record<string, unknown> = {};
+
+    if (typeof displayName === "string") {
+      const trimmed = displayName.trim();
+      if (trimmed.length < 2) {
+        throw new BadRequestException("Display name must be at least 2 characters long.");
+      }
+      updates.displayName = trimmed;
+    }
+
+    if (typeof phone === "string") {
+      const normalized = phone.replace(/\s+/g, "");
+      if (!/^\+?[0-9]{7,15}$/.test(normalized)) {
+        throw new BadRequestException("Enter a valid phone number using international format.");
+      }
+      updates.phone = normalized;
+      updates["metadata.guest"] = false;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      throw new BadRequestException("Provide a display name or phone number to update.");
+    }
+
+    const updatedUser = await this.userModel
+      .findByIdAndUpdate(userId, { $set: updates }, { new: true })
+      .exec();
+
+    if (!updatedUser) {
+      throw new BadRequestException("Unable to update profile because the account no longer exists.");
+    }
+
+    await this.appendAuditLog({
+      actorId: userId,
+      actorRoles,
+      action: "auth.profile.update",
+      severity: "info",
+      requestId,
+      ipAddress,
+      userAgent,
+      summary: "Updated profile details (display name / phone)"
+    });
+
+    logger.info(
+      {
+        event: "auth.profile.updated",
+        userId,
+        requestId,
+        updatedFields: Object.keys(updates)
+      },
+      "User profile updated"
+    );
+
+    return this.mapUserDocument(updatedUser);
+  }
+
   async getUserById(userId: string): Promise<User | null> {
     const user = await this.userModel.findById(userId).exec();
     if (!user) {
@@ -567,6 +1001,7 @@ export class PlatformAuthService {
       }
     });
   }
+
   private clearSessionCookies(reply: FastifyReply) {
     const secure = process.env.NODE_ENV === "production";
     const baseOptions = {
@@ -599,7 +1034,11 @@ export class PlatformAuthService {
       ipAddress: sessionDoc.ipAddress,
       userAgent: sessionDoc.userAgent,
       status: sessionDoc.status as SessionStatus,
-      metadata: sessionDoc.metadata,
+      metadata: {
+        device: sessionDoc.metadata?.device,
+        riskLevel: sessionDoc.metadata?.riskLevel,
+        tiktokOpenId: (sessionDoc.metadata as { tiktokOpenId?: string } | undefined)?.tiktokOpenId
+      }
     };
   }
 
@@ -609,22 +1048,26 @@ export class PlatformAuthService {
 
     for (const role of roles) {
       const rolePerms = rolePermissions[role] ?? [];
-      for (const permission of rolePerms) {
-        permissions.add(permission);
+      for (const perm of rolePerms) {
+        permissions.add(perm);
       }
     }
 
     return {
       id: user.id,
-      email: user.email,
+      email: user.email ?? null,
       phone: user.phone,
-      displayName: user.displayName,
       roles,
       permissions: Array.from(permissions),
+      displayName: user.displayName,
+      avatarUrl: user.avatarUrl,
+      tiktokUserId: user.tiktokUserId,
+      tiktokUsername: user.tiktokUsername,
+      tiktokScopes: Array.isArray(user.tiktokScopes) ? [...user.tiktokScopes] : [],
       status: user.status,
       createdAt: user.createdAt?.toISOString?.() ?? new Date().toISOString(),
       updatedAt: user.updatedAt?.toISOString?.() ?? new Date().toISOString(),
-      metadata: user.metadata as Record<string, unknown> | undefined
+      metadata: (user.metadata as Record<string, unknown> | undefined) ?? undefined
     };
   }
 }

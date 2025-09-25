@@ -132,13 +132,13 @@
 
 ## 3. In-House Authentication & Access Control
 - ☑ **Build internal auth service (user store, passwordless/email OTP or similar) with secure session issuance.** _(Owner: Platform)_
-  - Notes: 2025-10-05 – AI – Documented Phase 0 auth alignment (roles, permissions, data models) in `docs/design/auth-alignment.md` and shared Zod contracts; 2025-10-05 – AI – Delivered `PlatformAuthModule` with user/auth factor/session/audit schemas, OTP issuance, session cookies, and structured audit logging.
+  - Notes: 2025-10-05 – AI – Documented Phase 0 auth alignment (roles, permissions, data models) in `docs/design/auth-alignment.md` and shared Zod contracts; 2025-10-10 – AI – Replaced the OTP prototype with TikTok OAuth, encrypted token storage, Redis-backed login state, and progressive profile mutation + audit trail while deleting legacy OTP artifacts.
 - ☑ **Enforce role-based guards on GraphQL resolvers and admin routes, including rate limiting.** _(Owner: Backend)_
-  - Notes: 2025-10-05 – AI – Introduced auth context parsing, viewer contract, role guard, and rate limiter covering admin GraphQL resolvers with audit logging; 2025-10-06 – AI – Added end-to-end coverage for registration/login/session refresh plus guard enforcement and documented OTP entropy, session storage, and replay-protection review results.
+  - Notes: 2025-10-05 – AI – Introduced auth context parsing, viewer contract, role guard, and rate limiter covering admin GraphQL resolvers with audit logging; 2025-10-10 – AI – Added `ProfileCompletionGuard` for donations/challenges/payouts and converted the rate limiter to Redis so enforcement survives multi-instance deployments.
 - ☑ **Restrict CORS to approved origins and introduce Helmet + security headers across API.** _(Owner: Platform)_
   - Notes: 2025-10-05 – AI – Registered Fastify Helmet, enforced env-driven CORS allowlists with 403 rejections for unknown origins, echoed request IDs, and added tests covering headers + blocked origins.
 - ☑ **Produce responsive UX for login/signup/account management (desktop & mobile).** _(Owner: Frontend)_
-  - Notes: 2025-10-05 – AI – Built App Router flows for login, signup, OTP verification, and the account dashboard using shared UI primitives, responsive layouts, and React Query; wired Next API routes to proxy GraphQL auth mutations, forward cookies, and manage session revocation. 2025-10-06 – AI – Added middleware gatekeeping for `/account` + `/admin`, sticky CTA footers, mobile session drawers, and documented Figma references for auth/account parity in `docs/design/responsive-baselines.md`.
+  - Notes: 2025-10-05 – AI – Delivered the initial App Router auth flows and responsive account dashboard. 2025-10-10 – AI – Shipped TikTok-first login CTAs, guest browsing, and an inline account profile form that responds to `PROFILE_INCOMPLETE` errors while keeping mobile session drawers and CTA footers intact.
 
 
 ## 4. TikTok Content Ingestion & Presentation

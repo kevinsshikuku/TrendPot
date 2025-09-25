@@ -6,7 +6,7 @@ import { loadViewerOnServer } from "@/lib/server-auth";
 
 export const metadata: Metadata = {
   title: "Sign up · TrendPot",
-  description: "Create your TrendPot account with a passwordless, secure onboarding flow."
+  description: "Create your TrendPot account by continuing with TikTok—no email codes required."
 };
 
 interface SignupPageProps {
@@ -26,7 +26,8 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
       <div className="space-y-3">
         <h1 className="text-3xl font-semibold sm:text-4xl">Create an account</h1>
         <p className="max-w-xl text-sm text-slate-400 sm:text-base">
-          Start with your email and display name. We'll send a one-time passcode to finish enrollment on this device.
+          Explore challenges as a guest and, when you're ready to participate or support creators, continue with TikTok.
+          We'll bring back your session and collect any extra profile info only when it's required.
         </p>
       </div>
       <SignupForm nextPath={nextPath ?? undefined} />

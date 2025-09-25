@@ -13,6 +13,7 @@ import {
   featuredChallengesQueryKey,
   updateChallengeMutation
 } from "../../lib/challenge-queries";
+import { ProfileCompletionRequiredError } from "../../lib/errors";
 
 interface FormState {
   id: string;
@@ -41,6 +42,15 @@ const statusOptions = [
 ];
 
 const defaultChallengesQueryKey = challengesQueryKey({});
+
+const formatProfileError = (error: ProfileCompletionRequiredError) => {
+  const missing = error.missingFields
+    .map((field) => (field === "phone" ? "phone number" : field === "displayName" ? "display name" : field))
+    .join(", ");
+
+  const suffix = missing.length > 0 ? ` Missing: ${missing}.` : "";
+  return `${error.message}${suffix} Update your profile on the account page and try again.`;
+};
 
 export function CreateChallengeForm() {
   const router = useRouter();
@@ -80,6 +90,10 @@ export function CreateChallengeForm() {
       router.push(`/c/${challenge.id}`);
     },
     onError: (error: unknown) => {
+      if (error instanceof ProfileCompletionRequiredError) {
+        setErrorMessage(formatProfileError(error));
+        return;
+      }
       if (error instanceof Error) {
         setErrorMessage(error.message);
         return;
@@ -179,6 +193,10 @@ export function EditChallengeForm({ challenge }: EditChallengeFormProps) {
       setErrorMessage(null);
     },
     onError: (error: unknown) => {
+      if (error instanceof ProfileCompletionRequiredError) {
+        setErrorMessage(formatProfileError(error));
+        return;
+      }
       if (error instanceof Error) {
         setErrorMessage(error.message);
         return;
@@ -194,6 +212,10 @@ export function EditChallengeForm({ challenge }: EditChallengeFormProps) {
       setErrorMessage(null);
     },
     onError: (error: unknown) => {
+      if (error instanceof ProfileCompletionRequiredError) {
+        setErrorMessage(formatProfileError(error));
+        return;
+      }
       if (error instanceof Error) {
         setErrorMessage(error.message);
         return;

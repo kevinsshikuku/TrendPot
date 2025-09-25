@@ -1,18 +1,15 @@
 import { NextResponse } from "next/server";
 import { GraphQLRequestError, apiClient } from "@/lib/api-client";
-import { headersFromCookieHeader } from "@/lib/auth-headers";
 
 export async function GET(request: Request) {
   try {
     const cookieHeader = request.headers.get("cookie") ?? "";
-    const authHeaders = headersFromCookieHeader(cookieHeader);
 
     const viewer = await apiClient.getViewer({
       init: {
         headers: {
           Cookie: cookieHeader,
-          "x-requested-with": "nextjs",
-          ...authHeaders
+          "x-requested-with": "nextjs"
         }
       }
     });

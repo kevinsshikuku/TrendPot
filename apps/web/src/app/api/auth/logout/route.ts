@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
-import { AUTH_SESSION_COOKIE_NAME, AUTH_USER_COOKIE_NAME, GraphQLRequestError, apiClient } from "@/lib/api-client";
-import { headersFromCookieHeader } from "@/lib/auth-headers";
+import { GraphQLRequestError, apiClient } from "@/lib/api-client";
 
-const SECURE = process.env.NODE_ENV === "production";
+function appendBackendCookies(source: Response, target: NextResponse) {
+  const headers = source.headers as Headers & { getSetCookie?: () => string[] };
+  const raw = typeof headers.getSetCookie === "function" ? headers.getSetCookie() : [];
+
+  for (const cookie of raw) {
+    target.headers.append("set-cookie", cookie);
+  }
+}
 
 export async function POST(request: Request) {
   try {
@@ -14,56 +20,23 @@ export async function POST(request: Request) {
     }
 
     const cookieHeader = request.headers.get("cookie") ?? "";
-    const authHeaders = headersFromCookieHeader(cookieHeader);
 
     const result = await apiClient.logoutSession(sessionId, {
       includeResponse: true,
       init: {
         headers: {
           Cookie: cookieHeader,
-          "x-requested-with": "nextjs",
-          ...authHeaders
+          "x-requested-with": "nextjs"
         }
       }
     });
 
     const viewer = result.data;
     const response = NextResponse.json({ viewer });
+    appendBackendCookies(result.response, response);
 
-    const headers = result.response.headers as Headers & { getSetCookie?: () => string[] };
-    const raw = typeof headers.getSetCookie === "function" ? headers.getSetCookie() : [];
-
-    for (const cookie of raw) {
-      response.headers.append("set-cookie", cookie);
-    }
-
-    if (viewer.session) {
-      response.cookies.set({
-        name: AUTH_SESSION_COOKIE_NAME,
-        value: Buffer.from(JSON.stringify(viewer.session)).toString("base64url"),
-        httpOnly: false,
-        sameSite: "lax",
-        secure: SECURE,
-        path: "/",
-        expires: new Date(viewer.session.expiresAt)
-      });
-    } else {
-      response.cookies.delete(AUTH_SESSION_COOKIE_NAME);
-    }
-
-    if (viewer.user && viewer.session) {
-      response.cookies.set({
-        name: AUTH_USER_COOKIE_NAME,
-        value: Buffer.from(JSON.stringify(viewer.user)).toString("base64url"),
-        httpOnly: false,
-        sameSite: "lax",
-        secure: SECURE,
-        path: "/",
-        expires: new Date(viewer.session.expiresAt)
-      });
-    } else {
-      response.cookies.delete(AUTH_USER_COOKIE_NAME);
-    }
+    response.cookies.delete("trendpot.session");
+    response.cookies.delete("trendpot.user");
 
     return response;
   } catch (error) {

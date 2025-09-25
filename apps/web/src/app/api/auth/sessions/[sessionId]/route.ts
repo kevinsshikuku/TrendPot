@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { GraphQLRequestError, apiClient } from "@/lib/api-client";
-import { headersFromCookieHeader } from "@/lib/auth-headers";
 
 export async function DELETE(request: Request, { params }: { params: { sessionId: string } }) {
   try {
@@ -11,14 +10,12 @@ export async function DELETE(request: Request, { params }: { params: { sessionId
     }
 
     const cookieHeader = request.headers.get("cookie") ?? "";
-    const authHeaders = headersFromCookieHeader(cookieHeader);
 
     const session = await apiClient.revokeSession(sessionId, {
       init: {
         headers: {
           Cookie: cookieHeader,
-          "x-requested-with": "nextjs",
-          ...authHeaders
+          "x-requested-with": "nextjs"
         }
       }
     });
