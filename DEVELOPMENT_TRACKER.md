@@ -131,8 +131,6 @@
   - Notes: 2025-09-25 – AI – Implemented server-driven pagination with status/search filters, analytics panels, and responsive table/card views.
 
 ## 3. In-House Authentication & Access Control
-- ☑ **Build internal auth service (user store, passwordless/email OTP or similar) with secure session issuance.** _(Owner: Platform)_
-  - Notes: 2025-10-05 – AI – Documented Phase 0 auth alignment (roles, permissions, data models) in `docs/design/auth-alignment.md` and shared Zod contracts; 2025-10-05 – AI – Delivered `PlatformAuthModule` with user/auth factor/session/audit schemas, OTP issuance, session cookies, and structured audit logging.
 - ☐ **Enforce role-based guards on GraphQL resolvers and admin routes, including rate limiting.** _(Owner: Backend)_
   - Notes: 2025-10-05 – AI – Introduced auth context parsing, viewer contract, role guard, and rate limiter covering admin GraphQL resolvers with audit logging.
 - ☐ **Restrict CORS to approved origins and introduce Helmet + security headers across API.** _(Owner: Platform)_
