@@ -1,0 +1,12 @@
+const decorator = () => () => undefined;
+const Resolver = decorator;
+const Query = decorator;
+const Mutation = decorator;
+const Args = decorator;
+const ObjectType = decorator;
+const Field = decorator;
+const InputType = decorator;
+const Int = {};
+const Float = {};
+const GraphQLISODateTime = {};
+module.exports = { Resolver, Query, Mutation, Args, ObjectType, Field, InputType, Int, Float, GraphQLISODateTime };
