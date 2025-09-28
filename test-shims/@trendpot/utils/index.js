@@ -55,4 +55,41 @@ const mapAccountTokenToEncryptedSecret = (token) => ({
   authTag: token.authTag ?? token.tag ?? ""
 });
 
-module.exports = { TikTokTokenCipher, mapAccountTokenToEncryptedSecret };
+const DEFAULT_SCOPE_BUNDLE = [
+  "user.info.basic",
+  "video.list",
+  "video.data",
+  "webhook.subscription"
+];
+
+const getDefaultTikTokDisplayScopes = () => [...DEFAULT_SCOPE_BUNDLE];
+
+const parseTikTokDisplayScopes = (raw) => {
+  if (!raw) {
+    return getDefaultTikTokDisplayScopes();
+  }
+
+  const segments = raw
+    .split(/[\s,]+/)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+
+  if (segments.length === 0) {
+    return getDefaultTikTokDisplayScopes();
+  }
+
+  const unique = [];
+  for (const scope of segments) {
+    if (!unique.includes(scope)) {
+      unique.push(scope);
+    }
+  }
+  return unique;
+};
+
+module.exports = {
+  TikTokTokenCipher,
+  mapAccountTokenToEncryptedSecret,
+  getDefaultTikTokDisplayScopes,
+  parseTikTokDisplayScopes
+};

@@ -14,7 +14,7 @@ import type {
   UserPermission,
   UserRole
 } from "@trendpot/types";
-import type { TikTokEncryptedSecret } from "@trendpot/utils";
+import { parseTikTokDisplayScopes, type TikTokEncryptedSecret } from "@trendpot/utils";
 import { rolePermissions } from "@trendpot/types";
 import type { AuditLogDocument } from "./schemas/audit-log.schema";
 import { AuditLogEntity } from "./schemas/audit-log.schema";
@@ -36,14 +36,6 @@ const REFRESH_TTL_DAYS = Number(process.env.AUTH_REFRESH_TTL_DAYS ?? 14);
 const SESSION_COOKIE_NAME = process.env.AUTH_SESSION_COOKIE_NAME ?? "trendpot.sid";
 const REFRESH_COOKIE_NAME = process.env.AUTH_REFRESH_COOKIE_NAME ?? "trendpot.refresh";
 const COOKIE_DOMAIN = process.env.AUTH_COOKIE_DOMAIN;
-const TIKTOK_CLIENT_KEY = process.env.TIKTOK_CLIENT_KEY ?? "";
-const TIKTOK_CLIENT_SECRET = process.env.TIKTOK_CLIENT_SECRET ?? "";
-const TIKTOK_REDIRECT_URI = process.env.TIKTOK_REDIRECT_URI ?? "";
-const TIKTOK_TOKEN_ENDPOINT = process.env.TIKTOK_TOKEN_ENDPOINT ??
-  "https://open-api.tiktok.com/oauth/access_token/";
-const TIKTOK_PROFILE_ENDPOINT = process.env.TIKTOK_PROFILE_ENDPOINT ??
-  "https://open-api.tiktok.com/user/info/";
-const TIKTOK_STATE_TTL_SECONDS = Number(process.env.TIKTOK_STATE_TTL_SECONDS ?? 600);
 
 interface RequestContextMetadata {
   logger: Logger;
@@ -115,13 +107,20 @@ type TikTokProfile = {
   avatarUrl?: string;
 };
 
-const DEFAULT_TIKTOK_SCOPES = ["user.info.basic"];
-
 @Injectable()
 export class PlatformAuthService {
   private readonly sessionTokenSecret =
     process.env.AUTH_SESSION_TOKEN_SECRET ?? "trendpot-dev-session-token";
   private readonly refreshHashSecret = process.env.AUTH_REFRESH_HASH_SECRET ?? "trendpot-dev-refresh";
+  private readonly tiktokClientKey = process.env.TIKTOK_CLIENT_KEY ?? "";
+  private readonly tiktokClientSecret = process.env.TIKTOK_CLIENT_SECRET ?? "";
+  private readonly tiktokRedirectUri = process.env.TIKTOK_REDIRECT_URI ?? "";
+  private readonly tiktokTokenEndpoint =
+    process.env.TIKTOK_TOKEN_ENDPOINT ?? "https://open-api.tiktok.com/oauth/access_token/";
+  private readonly tiktokProfileEndpoint =
+    process.env.TIKTOK_PROFILE_ENDPOINT ?? "https://open-api.tiktok.com/user/info/";
+  private readonly tiktokStateTtlSeconds = Number(process.env.TIKTOK_STATE_TTL_SECONDS ?? 600);
+  private readonly defaultTikTokScopes = parseTikTokDisplayScopes(process.env.TIKTOK_DISPLAY_SCOPES);
   constructor(
     @InjectModel(UserEntity.name) private readonly userModel: Model<UserDocument>,
     @InjectModel(SessionEntity.name) private readonly sessionModel: Model<SessionDocument>,
@@ -138,11 +137,11 @@ export class PlatformAuthService {
   async createTikTokLoginIntent(params: TikTokLoginIntentParams): Promise<TikTokLoginIntentResult> {
     const { logger, requestId, ipAddress, scopes, returnPath, redirectUri, deviceLabel } = params;
 
-    const normalizedScopes = Array.isArray(scopes) && scopes.length > 0 ? scopes : DEFAULT_TIKTOK_SCOPES;
-    const resolvedRedirectUri = redirectUri ?? TIKTOK_REDIRECT_URI;
+    const normalizedScopes = this.resolveTikTokScopes(scopes);
+    const resolvedRedirectUri = redirectUri ?? this.tiktokRedirectUri;
     const sanitizedReturnPath = sanitizeReturnPath(returnPath);
 
-    if (!TIKTOK_CLIENT_KEY || !TIKTOK_CLIENT_SECRET || !resolvedRedirectUri) {
+    if (!this.tiktokClientKey || !this.tiktokClientSecret || !resolvedRedirectUri) {
       throw new BadRequestException("TikTok OAuth is not configured correctly");
     }
 
@@ -171,7 +170,7 @@ export class PlatformAuthService {
     };
 
     const client = this.redisService.getClient();
-    await client.set(redisKey, JSON.stringify(statePayload), "EX", TIKTOK_STATE_TTL_SECONDS);
+    await client.set(redisKey, JSON.stringify(statePayload), "EX", this.tiktokStateTtlSeconds);
 
     logger.info(
       {
@@ -186,7 +185,7 @@ export class PlatformAuthService {
 
     return {
       state,
-      clientKey: TIKTOK_CLIENT_KEY,
+      clientKey: this.tiktokClientKey,
       redirectUri: resolvedRedirectUri,
       scopes: normalizedScopes,
       returnPath: sanitizedReturnPath
@@ -284,6 +283,14 @@ export class PlatformAuthService {
     return `tiktok:state:${state}`;
   }
 
+  private resolveTikTokScopes(scopes?: string[]) {
+    if (Array.isArray(scopes) && scopes.length > 0) {
+      return [...scopes];
+    }
+
+    return [...this.defaultTikTokScopes];
+  }
+
   private async exchangeTikTokCode(params: {
     code: string;
     redirectUri: string;
@@ -294,14 +301,14 @@ export class PlatformAuthService {
     const { code, redirectUri, logger, requestId, ipAddress } = params;
 
     const body = new URLSearchParams({
-      client_key: TIKTOK_CLIENT_KEY,
-      client_secret: TIKTOK_CLIENT_SECRET,
+      client_key: this.tiktokClientKey,
+      client_secret: this.tiktokClientSecret,
       code,
       grant_type: "authorization_code",
       redirect_uri: redirectUri
     });
 
-    const response = await fetch(TIKTOK_TOKEN_ENDPOINT, {
+    const response = await fetch(this.tiktokTokenEndpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded"
@@ -371,7 +378,7 @@ export class PlatformAuthService {
     const { accessToken, openId, logger, requestId, ipAddress } = params;
 
     try {
-      const response = await fetch(TIKTOK_PROFILE_ENDPOINT, {
+      const response = await fetch(this.tiktokProfileEndpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
