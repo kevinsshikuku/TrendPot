@@ -164,3 +164,4 @@ class TikTokManagedKeyProvider {
 }
 
 module.exports = { TikTokTokenCipher, TikTokManagedKeyProvider, mapAccountTokenToEncryptedSecret };
+

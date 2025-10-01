@@ -24,6 +24,8 @@ const shimMap = new Map([
   ["@trendpot/ui", new URL("@trendpot/ui/index.js", shimBase).href]
 ]);
 
+const repoRoot = new URL("../", shimBase);
+
 /**
  * Minimal loader that transpiles TypeScript on the fly so we can run the Node
  * test runner without pulling additional tooling.
@@ -41,6 +43,18 @@ export async function resolve(specifier, context, defaultResolve) {
         const tsUrl = new URL(`${specifier}.ts`, parentUrl);
         return { url: tsUrl.href, shortCircuit: true };
       }
+    }
+  }
+
+  if (specifier.startsWith("@/")) {
+    const basePath = new URL(`apps/web/src/${specifier.slice(2)}`, repoRoot);
+    const tsxUrl = new URL(`${basePath.href}.tsx`);
+    try {
+      await access(tsxUrl);
+      return { url: tsxUrl.href, shortCircuit: true };
+    } catch {
+      const tsUrl = new URL(`${basePath.href}.ts`);
+      return { url: tsUrl.href, shortCircuit: true };
     }
   }
 

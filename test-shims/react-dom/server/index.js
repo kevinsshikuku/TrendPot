@@ -34,8 +34,5 @@ const renderNode = (node) => {
   return `${openTag}${children}</${node.type}>`;
 };
 
-module.exports = {
-  renderToString(element) {
-    return renderNode(element);
-  }
-};
+exports.renderToString = (element) => renderNode(element);
+exports.renderToStaticMarkup = (element) => renderNode(element);
