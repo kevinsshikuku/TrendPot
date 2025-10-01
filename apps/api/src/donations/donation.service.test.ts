@@ -7,7 +7,7 @@ import type { SignatureVerificationResult } from "../webhooks/mpesa-signature.se
 interface DonationRecord {
   _id: string;
   mpesaCheckoutRequestId: string;
-  merchantRequestId?: string;
+  mpesaMerchantRequestId?: string;
   accountReference?: string;
   amountCents: number;
   mpesaReceipt?: string;
@@ -41,7 +41,7 @@ class DonationModelStub {
       const record: DonationRecord = {
         _id: String(this.sequence++),
         mpesaCheckoutRequestId: input.mpesaCheckoutRequestId ?? "",
-        merchantRequestId: input.merchantRequestId,
+        mpesaMerchantRequestId: input.mpesaMerchantRequestId,
         amountCents: input.amountCents ?? 0,
         mpesaReceipt: input.mpesaReceipt,
         payerPhone: input.payerPhone,
@@ -77,7 +77,7 @@ class DonationModelStub {
         match.mpesaReceipt = patched.mpesaReceipt;
         match.payerPhone = patched.payerPhone;
         match.transactionCompletedAt = patched.transactionCompletedAt;
-        match.merchantRequestId = patched.merchantRequestId;
+        match.mpesaMerchantRequestId = patched.mpesaMerchantRequestId;
         match.accountReference = patched.accountReference;
         match.status = patched.status;
         match.resultCode = patched.resultCode;
@@ -156,8 +156,16 @@ const verification: SignatureVerificationResult = { valid: true };
 
 const connection = new ConnectionStub();
 
+class DarajaClientStub {
+  async requestStkPush() {
+    throw new Error("Not implemented");
+  }
+}
+
+const daraja = new DarajaClientStub();
+
 const buildService = (model: DonationModelStub, audit: AuditLogServiceStub) =>
-  new DonationService(connection as never, model as never, audit as never);
+  new DonationService(connection as never, model as never, audit as never, daraja as never);
 
 test("DonationService processes new callbacks and records audit entries", async () => {
   const model = new DonationModelStub();
