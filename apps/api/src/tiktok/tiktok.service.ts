@@ -77,8 +77,9 @@ interface TikTokDisplayListResponse {
   };
 }
 
-interface TikTokDisplayMetricsResponse {
+interface TikTokDisplayVideoDataResponse {
   data?: {
+    videos?: TikTokDisplayVideo[];
     metrics?: Array<{
       id: string;
       stats?: TikTokDisplayVideo["stats"];
@@ -264,7 +265,7 @@ export class TikTokDisplayService {
     const account = await this.resolveCreatorAccount(user, logger, requestId);
     const accessToken = await this.ensureValidAccessToken(account, logger, requestId);
 
-    const response = await this.callDisplayApi<TikTokDisplayMetricsResponse>(
+    const response = await this.callDisplayApi<TikTokDisplayVideoDataResponse>(
       DISPLAY_VIDEO_DATA_PATH,
       {
         method: "POST",
@@ -476,8 +477,8 @@ export class TikTokDisplayService {
     }
 
     const accessToken = await this.ensureValidAccessToken(account, logger, requestId);
-    const response = await this.callDisplayApi<TikTokDisplayListResponse>(
-      DISPLAY_VIDEO_LIST_PATH,
+    const response = await this.callDisplayApi<TikTokDisplayVideoDataResponse>(
+      DISPLAY_VIDEO_DATA_PATH,
       {
         method: "POST",
         headers: {
@@ -485,19 +486,24 @@ export class TikTokDisplayService {
           Authorization: `Bearer ${accessToken}`
         },
         body: JSON.stringify({
-          video_ids: [tiktokVideoId],
-          max_count: 1
+          video_ids: [tiktokVideoId]
         })
       },
       { rateLimitKey: "video_lookup", logger, requestId }
     );
 
+    const metrics = response.data?.metrics?.find((entry) => entry.id === tiktokVideoId)?.stats;
     const video = (response.data?.videos ?? []).find((item) => item.id === tiktokVideoId);
     if (!video) {
       throw new BadRequestException("TikTok video could not be located.");
     }
 
-    await this.upsertVideoFromDisplay(account, video, logger, requestId);
+    const normalizedVideo: TikTokDisplayVideo = {
+      ...video,
+      stats: metrics ?? video.stats
+    };
+
+    await this.upsertVideoFromDisplay(account, normalizedVideo, logger, requestId);
 
     const hydrated = await this.videoModel.findOne({ tiktokVideoId }).exec();
     if (!hydrated) {
