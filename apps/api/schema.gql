@@ -24,6 +24,13 @@ enum SubmissionState {
   REMOVED
 }
 
+enum DonationStatus {
+  PENDING
+  SUBMITTED
+  PAID
+  FAILED
+}
+
 type ChallengeSummary {
   id: String!
   title: String!
@@ -168,6 +175,30 @@ type SubmissionConnection {
   pageInfo: SubmissionPageInfo!
 }
 
+type DonationStatusChange {
+  status: DonationStatus!
+  occurredAt: DateTime!
+  description: String
+}
+
+type Donation {
+  id: String!
+  submissionId: String!
+  donorUserId: String!
+  amountCents: Int!
+  currency: String!
+  status: DonationStatus!
+  statusHistory: [DonationStatusChange!]!
+  mpesaCheckoutRequestId: String
+  mpesaMerchantRequestId: String
+  failureReason: String
+  lastResponseDescription: String
+  accountReference: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  version: Int!
+}
+
 type Health {
   status: String!
   service: String!
@@ -280,6 +311,15 @@ input SubmitToChallengeInput {
   tiktokVideoId: String!
 }
 
+input RequestDonationInput {
+  submissionId: String!
+  amountCents: Int!
+  msisdn: String!
+  idempotencyKey: String!
+  accountReference: String
+  narrative: String
+}
+
 type Query {
   featuredChallenges(status: String, limit: Int): [ChallengeSummary!]!
   challenges(status: String, limit: Int): [ChallengeSummary!]!
@@ -289,6 +329,8 @@ type Query {
   health: Health!
   viewer: Viewer!
   viewerSessions: [ViewerSession!]!
+  donation(id: String!): Donation
+  donationByCheckout(checkoutRequestId: String!): Donation
 }
 
 type Mutation {
@@ -300,6 +342,7 @@ type Mutation {
   updateViewerProfile(input: UpdateViewerProfileInput!): ViewerUser!
   logoutSession(sessionId: String!): Viewer!
   revokeSession(sessionId: String!): ViewerSession!
+  requestStkPush(input: RequestDonationInput!): Donation!
   submitToChallenge(input: SubmitToChallengeInput!): Submission!
 }
 

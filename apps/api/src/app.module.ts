@@ -29,7 +29,6 @@ import { WebhookEventEntity, WebhookEventSchema } from "./webhooks/webhook-event
 import { AuditLogEntity, AuditLogSchema } from "./audit/audit-log.schema";
 import { AuditLogService } from "./audit/audit-log.service";
 import { RedisService } from "./redis/redis.service";
-
 @Module({
   imports: [
     GraphQLModule.forRootAsync<MercuriusDriverConfig>({
@@ -55,7 +54,8 @@ import { RedisService } from "./redis/redis.service";
       { name: AuditLogEntity.name, schema: AuditLogSchema }
     ]),
     PlatformAuthModule,
-    TikTokModule
+    TikTokModule,
+    DonationsModule
   ],
   controllers: [MpesaWebhookController],
   providers: [

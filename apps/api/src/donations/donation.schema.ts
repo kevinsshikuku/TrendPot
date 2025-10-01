@@ -52,8 +52,9 @@ export class DonationEntity {
 
   @Prop({ required: false, type: Date })
   declare lastCallbackAt?: Date;
+
 }
 
 export const DonationSchema = SchemaFactory.createForClass(DonationEntity);
-
 DonationSchema.index({ mpesaCheckoutRequestId: 1 }, { unique: true });
+

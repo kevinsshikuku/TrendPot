@@ -3,6 +3,19 @@ import test from "node:test";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { createApiApp } from "./bootstrap";
 
+const TEST_ENC_KEY = Buffer.alloc(32, 1).toString("base64");
+const TEST_KEY_ID = "test-key-id";
+
+const configureManagedKeyEnv = (t: test.TestContext, key = TEST_ENC_KEY, keyId = TEST_KEY_ID) => {
+  process.env.TIKTOK_TOKEN_ENC_KEY = key;
+  process.env.TIKTOK_TOKEN_ENC_KEY_ID = keyId;
+
+  t.after(() => {
+    delete process.env.TIKTOK_TOKEN_ENC_KEY;
+    delete process.env.TIKTOK_TOKEN_ENC_KEY_ID;
+  });
+};
+
 const prepareApplication = async (): Promise<NestFastifyApplication> => {
   const app = await createApiApp();
   await app.init();
@@ -11,6 +24,7 @@ const prepareApplication = async (): Promise<NestFastifyApplication> => {
 };
 
 test("allows configured origins and sets security headers", async (t) => {
+  configureManagedKeyEnv(t);
   process.env.ALLOWED_ORIGINS = "https://app.trendpot.test, https://studio.trendpot.test";
 
   const app = await prepareApplication();
@@ -48,6 +62,7 @@ test("allows configured origins and sets security headers", async (t) => {
 });
 
 test("rejects disallowed origins with 403", async (t) => {
+  configureManagedKeyEnv(t);
   process.env.ALLOWED_ORIGINS = "https://app.trendpot.test";
 
   const app = await prepareApplication();
@@ -68,4 +83,19 @@ test("rejects disallowed origins with 403", async (t) => {
   assert.equal(response.statusCode, 403);
   assert.match(response.body, /Origin not allowed/);
   assert.equal(response.headers["access-control-allow-origin"], undefined);
+});
+
+test("fails fast when managed TikTok key is not configured", async () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  delete process.env.TIKTOK_TOKEN_ENC_KEY;
+  delete process.env.TIKTOK_TOKEN_ENC_KEY_ID;
+  process.env.NODE_ENV = "production";
+
+  await assert.rejects(async () => createApiApp(), /TIKTOK_TOKEN_ENC_KEY_ID must be configured/);
+
+  if (originalNodeEnv === undefined) {
+    delete process.env.NODE_ENV;
+  } else {
+    process.env.NODE_ENV = originalNodeEnv;
+  }
 });

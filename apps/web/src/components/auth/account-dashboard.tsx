@@ -7,6 +7,7 @@ import type { Viewer, ViewerSession } from "@trendpot/types";
 import { logout, revokeSession, updateProfile } from "@/lib/auth-client";
 import type { UpdateProfileInput } from "@/lib/auth-client";
 import { viewerQueryOptions, viewerSessionsQueryOptions } from "@/lib/auth-queries";
+import { getConfiguredTikTokScopes } from "@/lib/tiktok-scopes";
 
 interface SessionDrawerProps {
   session: ViewerSession | null;
@@ -154,6 +155,8 @@ export function AccountDashboard({
 
     return missing;
   }, [viewerUser?.displayName, viewerUser?.phone]);
+
+  const fallbackTikTokScopeLabel = useMemo(() => getConfiguredTikTokScopes().join(", "), []);
 
   const isProfileComplete = missingProfileFields.length === 0;
 
@@ -338,7 +341,7 @@ export function AccountDashboard({
                 <p className="text-xs uppercase tracking-wide text-slate-500">TikTok account</p>
                 <p className="mt-1 text-base font-medium text-slate-100">{tiktokHandle}</p>
                 <p className="mt-1 text-xs text-slate-500">
-                  Scopes: {tiktokScopes.length > 0 ? tiktokScopes.join(", ") : "user.info.basic"}
+                  Scopes: {tiktokScopes.length > 0 ? tiktokScopes.join(", ") : fallbackTikTokScopeLabel}
                 </p>
               </div>
               <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">

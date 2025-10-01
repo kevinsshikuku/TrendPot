@@ -9,6 +9,7 @@ const InputType = decorator;
 const Int = {};
 const Float = {};
 const GraphQLISODateTime = {};
+const registerEnumType = () => undefined;
 
 class GqlExecutionContext {
   constructor(payload) {
@@ -48,5 +49,8 @@ module.exports = {
   Int,
   Float,
   GraphQLISODateTime,
-  GqlExecutionContext
+  GqlExecutionContext,
+  registerEnumType: () => undefined
 };
+
+module.exports.default = module.exports;
