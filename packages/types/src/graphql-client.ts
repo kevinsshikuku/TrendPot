@@ -8,6 +8,16 @@ import type { ChallengeList } from "./challenges";
 import type { Challenge } from "./challenges";
 import { viewerSchema, viewerSessionSchema, userSchema } from "./auth";
 import type { TikTokLoginIntent, Viewer, ViewerSession, User } from "./auth";
+import {
+  donationHistoryListSchema,
+  donationSchema,
+  donationSubmissionContextSchema
+} from "./donations";
+import type {
+  Donation,
+  DonationHistoryEntry,
+  DonationSubmissionContext
+} from "./donations";
 
 
 export interface TrendPotGraphQLClientOptions {
@@ -56,6 +66,18 @@ export interface UpdateChallengeInput {
 export interface ArchiveChallengeInput {
   id: string;
   expectedVersion: number;
+}
+
+export interface RequestStkPushInput {
+  submissionId: string;
+  amountCents: number;
+  phoneNumber: string;
+  idempotencyKey: string;
+  donorDisplayName?: string;
+}
+
+export interface DonationHistoryParams {
+  first?: number;
 }
 
 export interface GraphQLOperationOptions {
@@ -553,6 +575,106 @@ const ARCHIVE_CHALLENGE_MUTATION = /* GraphQL */ `
   }
 `;
 
+const requestStkPushDataSchema = z.object({
+  requestStkPush: donationSchema
+});
+
+const REQUEST_STK_PUSH_MUTATION = /* GraphQL */ `
+  mutation RequestStkPush($input: RequestStkPushInput!) {
+    requestStkPush(input: $input) {
+      id
+      submissionId
+      amountCents
+      currency
+      status
+      phoneNumber
+      mpesaCheckoutRequestId
+      mpesaReceipt
+      failureReason
+      idempotencyKey
+      donorDisplayName
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+const donationDataSchema = z.object({
+  donation: donationSchema.nullable()
+});
+
+const DONATION_QUERY = /* GraphQL */ `
+  query Donation($id: String!) {
+    donation(id: $id) {
+      id
+      submissionId
+      amountCents
+      currency
+      status
+      phoneNumber
+      mpesaCheckoutRequestId
+      mpesaReceipt
+      failureReason
+      idempotencyKey
+      donorDisplayName
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+const donationHistoryDataSchema = z.object({
+  viewerDonationHistory: donationHistoryListSchema
+});
+
+const DONATION_HISTORY_QUERY = /* GraphQL */ `
+  query ViewerDonationHistory($first: Int) {
+    viewerDonationHistory(first: $first) {
+      id
+      submissionId
+      amountCents
+      currency
+      status
+      phoneNumber
+      mpesaCheckoutRequestId
+      mpesaReceipt
+      failureReason
+      idempotencyKey
+      donorDisplayName
+      createdAt
+      updatedAt
+      challengeId
+      challengeTitle
+      challengeTagline
+      challengeShareUrl
+      submissionTitle
+    }
+  }
+`;
+
+const submissionDonationContextDataSchema = z.object({
+  submissionDonationContext: donationSubmissionContextSchema.nullable()
+});
+
+const SUBMISSION_DONATION_CONTEXT_QUERY = /* GraphQL */ `
+  query SubmissionDonationContext($submissionId: String!) {
+    submissionDonationContext(submissionId: $submissionId) {
+      id
+      title
+      creatorDisplayName
+      challenge {
+        id
+        title
+        tagline
+        currency
+        goal
+        raised
+        shareUrl
+      }
+    }
+  }
+`;
+
 export class TrendPotGraphQLClient {
   private readonly baseUrl: string;
   private readonly fetchFn: typeof fetch;
@@ -767,6 +889,69 @@ export class TrendPotGraphQLClient {
     return result.data;
   }
 
+  async requestStkPush(
+    input: RequestStkPushInput,
+    options: GraphQLOperationOptions = {}
+  ): Promise<Donation> {
+    const result = await this.performGraphQLRequest({
+      query: REQUEST_STK_PUSH_MUTATION,
+      variables: { input },
+      parser: (payload) => requestStkPushDataSchema.parse(payload).requestStkPush,
+      init: options.init
+    });
+
+    return result.data;
+  }
+
+  async getDonation(
+    id: string,
+    options: GraphQLOperationOptions = {}
+  ): Promise<Donation | null> {
+    const result = await this.performGraphQLRequest({
+      query: DONATION_QUERY,
+      variables: { id },
+      parser: (payload) => donationDataSchema.parse(payload).donation,
+      init: options.init
+    });
+
+    return result.data;
+  }
+
+  async getViewerDonationHistory(
+    params: DonationHistoryParams = {},
+    options: GraphQLOperationOptions = {}
+  ): Promise<DonationHistoryEntry[]> {
+    const variables: Record<string, unknown> = {};
+
+    if (typeof params.first === "number" && Number.isFinite(params.first) && params.first > 0) {
+      variables.first = Math.floor(params.first);
+    }
+
+    const result = await this.performGraphQLRequest({
+      query: DONATION_HISTORY_QUERY,
+      variables: Object.keys(variables).length > 0 ? variables : undefined,
+      parser: (payload) => donationHistoryDataSchema.parse(payload).viewerDonationHistory,
+      init: options.init
+    });
+
+    return result.data;
+  }
+
+  async getSubmissionDonationContext(
+    submissionId: string,
+    options: GraphQLOperationOptions = {}
+  ): Promise<DonationSubmissionContext | null> {
+    const result = await this.performGraphQLRequest({
+      query: SUBMISSION_DONATION_CONTEXT_QUERY,
+      variables: { submissionId },
+      parser: (payload) =>
+        submissionDonationContextDataSchema.parse(payload).submissionDonationContext,
+      init: options.init
+    });
+
+    return result.data;
+  }
+
   async getViewer(): Promise<Viewer> {
     return this.executeGraphQL({
       query: VIEWER_QUERY,
@@ -893,5 +1078,9 @@ export {
   CREATE_CHALLENGE_MUTATION,
   CHALLENGE_ADMIN_LIST_QUERY,
   UPDATE_CHALLENGE_MUTATION,
-  ARCHIVE_CHALLENGE_MUTATION
+  ARCHIVE_CHALLENGE_MUTATION,
+  REQUEST_STK_PUSH_MUTATION,
+  DONATION_QUERY,
+  DONATION_HISTORY_QUERY,
+  SUBMISSION_DONATION_CONTEXT_QUERY
 };
