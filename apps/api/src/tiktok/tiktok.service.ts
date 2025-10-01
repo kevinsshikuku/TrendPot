@@ -123,26 +123,64 @@ export class TikTokDisplayService {
     const limit = sanitizePageSize(first);
     const cursor = decodeVideoCursor(after);
 
-    const response = await this.callDisplayApi<TikTokDisplayListResponse>(
-      DISPLAY_VIDEO_LIST_PATH,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`
-        },
-        body: JSON.stringify({
-          cursor: null,
-          max_count: limit
-        })
-      },
-      { rateLimitKey: "video_list", logger, requestId }
-    );
+    let apiCursor = cursor?.apiCursor ?? null;
+    let totalFetched = 0;
+    let totalPersisted = 0;
+    let apiHasMore = false;
+    let nextApiCursor: string | null = null;
+    const seenCursors = new Set<string>();
 
-    const videos = response.data?.videos ?? [];
-    await Promise.all(
-      videos.map((video) => this.upsertVideoFromDisplay(account, video, logger, requestId))
-    );
+    do {
+      const remaining = limit - totalFetched;
+      const pageSize = Math.min(PAGE_SIZE, Math.max(1, remaining));
+      const response = await this.callDisplayApi<TikTokDisplayListResponse>(
+        DISPLAY_VIDEO_LIST_PATH,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`
+          },
+          body: JSON.stringify({
+            cursor: apiCursor ?? null,
+            max_count: pageSize
+          })
+        },
+        { rateLimitKey: "video_list", logger, requestId }
+      );
+
+      const videos = response.data?.videos ?? [];
+      totalFetched += videos.length;
+
+      if (videos.length > 0) {
+        await Promise.all(
+          videos.map((video) => this.upsertVideoFromDisplay(account, video, logger, requestId))
+        );
+        totalPersisted += videos.length;
+      }
+
+      const responseCursor = response.data?.cursor ?? null;
+      apiHasMore = Boolean(response.data?.has_more && responseCursor);
+
+      if (apiHasMore) {
+        nextApiCursor = responseCursor;
+        const cursorKey = responseCursor ?? "";
+        if (seenCursors.has(cursorKey)) {
+          logger.warn(
+            { event: "tiktok.video.duplicate_cursor", requestId, cursor: responseCursor },
+            "TikTok returned a duplicate cursor; stopping pagination"
+          );
+          apiHasMore = false;
+          nextApiCursor = null;
+          break;
+        }
+        seenCursors.add(cursorKey);
+      } else {
+        nextApiCursor = null;
+      }
+
+      apiCursor = responseCursor;
+    } while (apiHasMore && totalFetched < limit);
 
     await this.accountModel
       .updateOne(
@@ -151,14 +189,17 @@ export class TikTokDisplayService {
       )
       .exec();
 
-    const connection = await this.buildVideoConnection(account._id, limit, cursor);
+    const connection = await this.buildVideoConnection(account._id, limit, cursor, {
+      apiHasMore,
+      nextApiCursor
+    });
 
     await this.recordAuditLog({
       user,
       action: "tiktok.video.list",
       logger,
       requestId,
-      summary: `Fetched ${videos.length} TikTok videos for review.`
+      summary: `Fetched ${totalPersisted} TikTok videos for review.`
     });
 
     return connection;
@@ -510,7 +551,8 @@ export class TikTokDisplayService {
   private async buildVideoConnection(
     accountId: Types.ObjectId,
     limit: number,
-    cursor: ReturnType<typeof decodeVideoCursor>
+    cursor: ReturnType<typeof decodeVideoCursor>,
+    options?: { apiHasMore: boolean; nextApiCursor: string | null }
   ): Promise<VideoConnectionResult> {
     const conditions: Record<string, unknown>[] = [{ ownerTikTokAccountId: accountId }];
 
@@ -532,17 +574,32 @@ export class TikTokDisplayService {
       .populate({ path: "ownerTikTokAccountId", model: TikTokAccountEntity.name })
       .exec();
 
-    const hasNextPage = documents.length > limit;
-    const window = hasNextPage ? documents.slice(0, -1) : documents;
+    const apiHasMore = options?.apiHasMore ?? false;
+    const hasMoreDocs = documents.length > limit;
+    const hasNextPage = hasMoreDocs || apiHasMore;
+    const window = hasMoreDocs ? documents.slice(0, -1) : documents;
 
     const edges = window.map((doc) => {
       const owner = doc.ownerTikTokAccountId as unknown as TikTokAccountDocument;
       const node = toVideoNode(doc, owner);
-      const edgeCursor = encodeVideoCursor(doc.postedAt ?? doc.createdAt ?? new Date(), doc._id);
+      const edgeCursor = encodeVideoCursor({
+        postedAt: doc.postedAt ?? doc.createdAt ?? new Date(),
+        id: doc._id
+      });
       return { cursor: edgeCursor, node };
     });
 
-    const endCursor = edges.length > 0 ? edges[edges.length - 1]?.cursor ?? null : null;
+    let endCursor: string | null = null;
+    if (edges.length > 0) {
+      const lastDoc = window[window.length - 1];
+      const lastCursor = lastDoc?.postedAt ?? lastDoc?.createdAt ?? new Date();
+      const lastId = lastDoc?._id ?? new Types.ObjectId();
+      endCursor = encodeVideoCursor({
+        postedAt: lastCursor,
+        id: lastId,
+        apiCursor: apiHasMore ? options?.nextApiCursor ?? null : null
+      });
+    }
 
     return {
       edges,
@@ -715,27 +772,55 @@ const buildEmbed = (shareUrl: string, embedHtml?: string, username?: string | nu
   };
 };
 
-const encodeVideoCursor = (postedAt: Date, id: Types.ObjectId): string => {
-  return Buffer.from(`${postedAt.toISOString()}::${id.toHexString()}`).toString("base64");
+const encodeVideoCursor = (params: { postedAt: Date; id: Types.ObjectId; apiCursor?: string | null }): string => {
+  const payload = {
+    postedAt: params.postedAt.toISOString(),
+    id: params.id.toHexString(),
+    apiCursor: params.apiCursor ?? null
+  } satisfies { postedAt: string; id: string; apiCursor: string | null };
+
+  return Buffer.from(JSON.stringify(payload)).toString("base64");
 };
 
-const decodeVideoCursor = (cursor?: string): { postedAt: Date; id: Types.ObjectId } | null => {
+const decodeVideoCursor = (
+  cursor?: string
+): { postedAt: Date; id: Types.ObjectId; apiCursor: string | null } | null => {
   if (!cursor) {
     return null;
   }
 
   try {
     const raw = Buffer.from(cursor, "base64").toString("utf8");
-    const [postedAtIso, idHex] = raw.split("::");
-    const postedAt = new Date(postedAtIso);
-    if (!postedAtIso || Number.isNaN(postedAt.getTime()) || !idHex) {
-      return null;
-    }
 
-    return {
-      postedAt,
-      id: new Types.ObjectId(idHex)
-    };
+    try {
+      const parsed = JSON.parse(raw) as { postedAt?: string; id?: string; apiCursor?: string | null };
+      if (!parsed?.postedAt || !parsed.id) {
+        throw new Error("invalid payload");
+      }
+
+      const postedAt = new Date(parsed.postedAt);
+      if (Number.isNaN(postedAt.getTime())) {
+        throw new Error("invalid date");
+      }
+
+      return {
+        postedAt,
+        id: new Types.ObjectId(parsed.id),
+        apiCursor: parsed.apiCursor ?? null
+      };
+    } catch {
+      const [postedAtIso, idHex] = raw.split("::");
+      const postedAt = new Date(postedAtIso);
+      if (!postedAtIso || Number.isNaN(postedAt.getTime()) || !idHex) {
+        return null;
+      }
+
+      return {
+        postedAt,
+        id: new Types.ObjectId(idHex),
+        apiCursor: null
+      };
+    }
   } catch {
     return null;
   }
