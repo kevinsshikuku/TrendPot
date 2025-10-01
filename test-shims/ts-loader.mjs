@@ -13,6 +13,7 @@ const shimMap = new Map([
   ["@nestjs/mercurius", new URL("@nestjs/mercurius/index.js", shimBase).href],
   ["@nestjs/platform-fastify", new URL("@nestjs/platform-fastify/index.js", shimBase).href],
   ["@fastify/cors", new URL("@fastify/cors/index.js", shimBase).href],
+  ["@fastify/helmet", new URL("@fastify/helmet/index.js", shimBase).href],
   ["mongoose", new URL("mongoose/index.js", shimBase).href],
   ["@trendpot/types", new URL("@trendpot/types/index.js", shimBase).href],
   ["@trendpot/utils", new URL("@trendpot/utils/index.js", shimBase).href],
@@ -23,6 +24,8 @@ const shimMap = new Map([
   ["@tanstack/react-query", new URL("@tanstack/react-query/index.js", shimBase).href],
   ["@trendpot/ui", new URL("@trendpot/ui/index.js", shimBase).href]
 ]);
+
+const repoRoot = new URL("../", shimBase);
 
 /**
  * Minimal loader that transpiles TypeScript on the fly so we can run the Node
@@ -41,6 +44,18 @@ export async function resolve(specifier, context, defaultResolve) {
         const tsUrl = new URL(`${specifier}.ts`, parentUrl);
         return { url: tsUrl.href, shortCircuit: true };
       }
+    }
+  }
+
+  if (specifier.startsWith("@/")) {
+    const basePath = new URL(`apps/web/src/${specifier.slice(2)}`, repoRoot);
+    const tsxUrl = new URL(`${basePath.href}.tsx`);
+    try {
+      await access(tsxUrl);
+      return { url: tsxUrl.href, shortCircuit: true };
+    } catch {
+      const tsUrl = new URL(`${basePath.href}.ts`);
+      return { url: tsUrl.href, shortCircuit: true };
     }
   }
 

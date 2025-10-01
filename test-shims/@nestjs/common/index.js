@@ -8,6 +8,7 @@ class NestException extends Error {
 class BadRequestException extends NestException {}
 class UnauthorizedException extends NestException {}
 class ForbiddenException extends NestException {}
+class ConflictException extends NestException {}
 class TooManyRequestsException extends NestException {}
 
 const decorator = () => () => undefined;
@@ -27,6 +28,7 @@ module.exports = {
   BadRequestException,
   UnauthorizedException,
   ForbiddenException,
+  ConflictException,
   TooManyRequestsException,
   Module,
   Injectable,

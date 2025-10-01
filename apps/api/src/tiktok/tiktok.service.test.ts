@@ -1,4 +1,3 @@
-import assert from "node:assert/strict";
 import test from "node:test";
 
 import { BadRequestException } from "@nestjs/common";
@@ -158,4 +157,221 @@ test("TikTokDisplayService.ensureVideoAvailable throws when /video/data cannot l
 
     assert.deepStrictEqual(paths, ["/v2/video/data/"]);
 });
+
+=======
+import { test } from "node:test";
+import { Types } from "mongoose";
+import type { Logger } from "pino";
+
+import type { AuthenticatedUser } from "../auth/auth.types";
+import { TikTokDisplayService } from "./tiktok.service";
+
+const encodeCursor = (payload: { postedAt: Date; id: Types.ObjectId; apiCursor?: string | null }) => {
+  return Buffer.from(
+    JSON.stringify({
+      postedAt: payload.postedAt.toISOString(),
+      id: payload.id.toHexString(),
+      apiCursor: payload.apiCursor ?? null
+    })
+  ).toString("base64");
+};
+
+const decodeCursor = (cursor: string) => {
+  return JSON.parse(Buffer.from(cursor, "base64").toString("utf8")) as {
+    postedAt: string;
+    id: string;
+    apiCursor: string | null;
+  };
+};
+
+const createLoggerStub = (): Logger => {
+  const stub: any = {
+    level: "info",
+    info: () => undefined,
+    warn: () => undefined,
+    error: () => undefined,
+    debug: () => undefined,
+    trace: () => undefined,
+    fatal: () => undefined
+  };
+
+  stub.child = () => stub;
+
+  return stub as Logger;
+};
+
+test("listCreatorVideos paginates TikTok responses and encodes next cursor", async () => {
+  const accountId = new Types.ObjectId();
+  const account = {
+    _id: accountId,
+    openId: "creator-open-id",
+    username: "creator",
+    accessToken: { keyId: "key" },
+    refreshToken: { keyId: "key" }
+  };
+
+  const accountFindCalls: unknown[] = [];
+  const accountUpdateCalls: Array<{ filter: unknown; update: unknown }> = [];
+
+  const accountModel = {
+    findOne(filter: unknown) {
+      accountFindCalls.push(filter);
+      return {
+        async exec() {
+          return account;
+        }
+      };
+    },
+    updateOne(filter: unknown, update: unknown) {
+      accountUpdateCalls.push({ filter, update });
+      return {
+        async exec() {
+          return { acknowledged: true };
+        }
+      };
+    }
+  };
+
+  const auditLogs: unknown[] = [];
+  const auditLogModel = {
+    async create(payload: unknown) {
+      auditLogs.push(payload);
+    }
+  };
+
+  const rateLimitService = {
+    async consume() {
+      return { allowed: true };
+    }
+  };
+
+  const service = new TikTokDisplayService(
+    {} as never,
+    accountModel as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    auditLogModel as never,
+    {} as never,
+    rateLimitService as never
+  );
+
+  const callRequests: Array<{ cursor: string | null; max_count: number }> = [];
+  const persistedVideos: string[] = [];
+  const apiPages = [
+    {
+      videos: [
+        { id: "video-1", description: "first" },
+        { id: "video-2", description: "second" }
+      ],
+      cursor: "cursor-a",
+      has_more: true
+    },
+    {
+      videos: [
+        { id: "video-3", description: "third" },
+        { id: "video-4", description: "fourth" }
+      ],
+      cursor: "cursor-b",
+      has_more: true
+    }
+  ];
+
+  Reflect.set(service as any, "ensureValidAccessToken", async () => "access-token");
+  Reflect.set(service as any, "callDisplayApi", async (_path: string, init: RequestInit) => {
+    const body = JSON.parse(String(init.body)) as { cursor: string | null; max_count: number };
+    callRequests.push({ cursor: body.cursor, max_count: body.max_count });
+    const page = apiPages.shift() ?? { videos: [], cursor: null, has_more: false };
+    return {
+      data: {
+        videos: page.videos,
+        cursor: page.cursor,
+        has_more: page.has_more
+      }
+    };
+  });
+  Reflect.set(service as any, "upsertVideoFromDisplay", async (_account: unknown, video: { id: string }) => {
+    persistedVideos.push(video.id);
+  });
+
+  const lastDocId = new Types.ObjectId();
+  let buildArgs: {
+    accountId: unknown;
+    limit: number;
+    cursor: unknown;
+    options: { apiHasMore: boolean; nextApiCursor: string | null } | undefined;
+  } | null = null;
+
+  Reflect.set(
+    service as any,
+    "buildVideoConnection",
+    async (
+      accountIdArg: unknown,
+      limitArg: number,
+      cursorArg: unknown,
+      optionsArg: { apiHasMore: boolean; nextApiCursor: string | null } | undefined
+    ) => {
+      buildArgs = { accountId: accountIdArg, limit: limitArg, cursor: cursorArg, options: optionsArg };
+      return {
+        edges: [
+          {
+            cursor: encodeCursor({ postedAt: new Date("2024-03-01T00:00:00Z"), id: lastDocId }),
+            node: { id: "video-node" }
+          }
+        ],
+        pageInfo: {
+          endCursor: encodeCursor({
+            postedAt: new Date("2024-03-02T00:00:00Z"),
+            id: lastDocId,
+            apiCursor: optionsArg?.nextApiCursor ?? null
+          }),
+          hasNextPage: Boolean(optionsArg?.apiHasMore)
+        }
+      };
+    }
+  );
+
+  const user = {
+    id: new Types.ObjectId().toHexString(),
+    roles: ["creator"],
+    tiktokUserId: "creator-open-id"
+  } as unknown as AuthenticatedUser;
+
+  const previousCursor = encodeCursor({
+    postedAt: new Date("2024-02-01T00:00:00Z"),
+    id: new Types.ObjectId(),
+    apiCursor: "cursor-prev"
+  });
+
+  const logger = createLoggerStub();
+
+  const result = await service.listCreatorVideos({
+    user,
+    first: 4,
+    after: previousCursor,
+    logger,
+    requestId: "req-123"
+  });
+
+  assert.equal(callRequests.length, 2);
+  assert.deepEqual(callRequests[0], { cursor: "cursor-prev", max_count: 4 });
+  assert.deepEqual(callRequests[1], { cursor: "cursor-a", max_count: 2 });
+
+  assert.deepEqual(persistedVideos, ["video-1", "video-2", "video-3", "video-4"]);
+
+  assert.ok(buildArgs);
+  assert.equal(String((buildArgs as any).accountId), String(accountId));
+  assert.equal(buildArgs?.limit, 4);
+  assert.equal((buildArgs?.cursor as { apiCursor: string | null } | undefined)?.apiCursor, "cursor-prev");
+  assert.equal(buildArgs?.options?.apiHasMore, true);
+  assert.equal(buildArgs?.options?.nextApiCursor, "cursor-b");
+
+  const pageInfoPayload = decodeCursor(result.pageInfo.endCursor ?? "");
+  assert.equal(pageInfoPayload.apiCursor, "cursor-b");
+  assert.equal(result.pageInfo.hasNextPage, true);
+
+  assert.equal(accountFindCalls.length, 1);
+  assert.equal(accountUpdateCalls.length, 1);
+  assert.equal(auditLogs.length, 1);
+  assert.match((auditLogs[0] as { context: { summary: string } }).context.summary, /Fetched 4 TikTok videos/);
 

@@ -20,6 +20,7 @@ import { structuredErrorFormatter } from "./observability/error-formatter";
 import { PlatformAuthModule } from "./platform-auth/platform-auth.module";
 import { PlatformAuthService } from "./platform-auth/platform-auth.service";
 import { TikTokModule } from "./tiktok/tiktok.module";
+import { PayoutsModule } from "./payouts/payouts.module";
 
 @Module({
   imports: [
@@ -43,7 +44,8 @@ import { TikTokModule } from "./tiktok/tiktok.module";
       { name: SubmissionEntity.name, schema: SubmissionSchema }
     ]),
     PlatformAuthModule,
-    TikTokModule
+    TikTokModule,
+    PayoutsModule
   ],
   providers: [
     AppService,

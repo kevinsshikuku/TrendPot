@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 
 export interface TikTokEncryptedSecret {
   ciphertext: string;
@@ -8,24 +8,17 @@ export interface TikTokEncryptedSecret {
 
 export interface TikTokTokenCipherOptions {
   /**
-   * Base64 encoded 32-byte key. When omitted we derive a deterministic
-   * development key from the session token secret to keep local bootstrap
-   * simple while still exercising the encryption path.
+   * Base64 encoded 32-byte key. When omitted we fall back to the
+   * `TIKTOK_TOKEN_ENC_KEY` environment variable so production workloads can
+   * rely on managed bootstrap.
    */
   key?: string;
-  /**
-   * Optional secret used to derive a key when `key` is not supplied.
-   */
-  fallbackSecret?: string;
   /**
    * Identifier persisted alongside encrypted payloads so that rotation can
    * verify callers are using a compatible key at decrypt time.
    */
   keyId?: string;
 }
-
-const DEFAULT_SESSION_SECRET = "trendpot-dev-session-token";
-const DEFAULT_KEY_ID = "local-dev";
 
 const decodeBase64 = (value: string): Buffer => {
   try {
@@ -42,19 +35,23 @@ export class TikTokTokenCipher {
 
   constructor(options: TikTokTokenCipherOptions = {}) {
     const explicitKey = options.key ?? process.env.TIKTOK_TOKEN_ENC_KEY;
-    const fallbackSecret = options.fallbackSecret ?? process.env.AUTH_SESSION_TOKEN_SECRET ?? DEFAULT_SESSION_SECRET;
-    this.keyId = options.keyId ?? process.env.TIKTOK_TOKEN_ENC_KEY_ID ?? DEFAULT_KEY_ID;
+    const keyId = options.keyId ?? process.env.TIKTOK_TOKEN_ENC_KEY_ID;
 
-    if (explicitKey) {
-      const buffer = decodeBase64(explicitKey);
-      if (buffer.length !== 32) {
-        throw new Error("TikTok token encryption key must be 32 bytes when decoded from base64.");
-      }
-      this.key = buffer;
-      return;
+    if (!explicitKey) {
+      throw new Error("TikTok token encryption key must be provided via options.key or TIKTOK_TOKEN_ENC_KEY.");
     }
 
-    this.key = createHash("sha256").update(fallbackSecret).digest();
+    if (!keyId) {
+      throw new Error("TikTok token encryption key ID must be provided via options.keyId or TIKTOK_TOKEN_ENC_KEY_ID.");
+    }
+
+    const buffer = decodeBase64(explicitKey);
+    if (buffer.length !== 32) {
+      throw new Error("TikTok token encryption key must be 32 bytes when decoded from base64.");
+    }
+
+    this.key = buffer;
+    this.keyId = keyId;
   }
 
   encrypt(plaintext: string): TikTokEncryptedSecret {
