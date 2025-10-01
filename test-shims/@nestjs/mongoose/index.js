@@ -1,5 +1,6 @@
 const decorator = () => () => undefined;
 const InjectModel = decorator;
+const InjectConnection = decorator;
 const Schema = decorator;
 const Prop = decorator;
 const SchemaFactory = {
@@ -26,4 +27,4 @@ const MongooseModule = {
     return {};
   }
 };
-module.exports = { InjectModel, Schema, Prop, SchemaFactory, MongooseModule };
+module.exports = { InjectModel, InjectConnection, Schema, Prop, SchemaFactory, MongooseModule };

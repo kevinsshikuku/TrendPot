@@ -1,32 +1,6 @@
 import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
-import { HydratedDocument, SchemaTypes } from "mongoose";
-
-export enum DonationStatus {
-  Pending = "pending",
-  Submitted = "submitted",
-  Paid = "paid",
-  Failed = "failed"
-}
-
-@Schema({ _id: false })
-export class DonationStatusHistoryEntry {
-  @Prop({
-    required: true,
-    enum: ["pending", "submitted", "paid", "failed"],
-    lowercase: true,
-    trim: true,
-    type: String
-  })
-  declare status: DonationStatus;
-
-  @Prop({ required: true })
-  declare occurredAt: Date;
-
-  @Prop({ required: false, trim: true })
-  declare description?: string | null;
-}
-
-const DonationStatusHistorySchema = SchemaFactory.createForClass(DonationStatusHistoryEntry);
+import { HydratedDocument, Types } from "mongoose";
+import { DonationStatus } from "./donation-status.enum";
 
 export type DonationDocument = HydratedDocument<DonationEntity>;
 
@@ -37,57 +11,50 @@ export type DonationDocument = HydratedDocument<DonationEntity>;
   toObject: { virtuals: true }
 })
 export class DonationEntity {
-  @Prop({ type: SchemaTypes.ObjectId, required: true, index: true })
-  declare submissionId: SchemaTypes.ObjectId | string;
+  @Prop({ type: Types.ObjectId, ref: "submissions", required: false })
+  declare submissionId?: Types.ObjectId;
 
-  @Prop({ type: SchemaTypes.ObjectId, required: true, index: true })
-  declare donorUserId: SchemaTypes.ObjectId | string;
+  @Prop({ type: Types.ObjectId, ref: "users", required: false })
+  declare donorUserId?: Types.ObjectId;
 
-  @Prop({ required: true, min: 1 })
+  @Prop({ required: true, min: 0 })
   declare amountCents: number;
 
-  @Prop({ required: true, uppercase: true, length: 3, default: "KES" })
-  declare currency: string;
-
-  @Prop({
-    required: true,
-    enum: ["pending", "submitted", "paid", "failed"],
-    lowercase: true,
-    trim: true,
-    default: DonationStatus.Pending
-  })
+  @Prop({ required: true, enum: DonationStatus, default: DonationStatus.Pending })
   declare status: DonationStatus;
 
-  @Prop({ type: [DonationStatusHistorySchema], required: true, default: [] })
-  declare statusHistory: DonationStatusHistoryEntry[];
-
   @Prop({ required: true, unique: true, index: true })
-  declare idempotencyKeyHash: string;
+  declare mpesaCheckoutRequestId: string;
 
-  @Prop({ required: false, unique: true, sparse: true })
-  declare mpesaCheckoutRequestId?: string | null;
+  @Prop({ required: false })
+  declare merchantRequestId?: string;
 
-  @Prop({ required: false, unique: true, sparse: true })
-  declare mpesaMerchantRequestId?: string | null;
+  @Prop({ required: false })
+  declare accountReference?: string;
 
-  @Prop({ required: false, trim: true })
-  declare failureReason?: string | null;
+  @Prop({ required: false })
+  declare mpesaReceipt?: string;
 
-  @Prop({ required: false, trim: true })
-  declare lastResponseDescription?: string | null;
+  @Prop({ required: false })
+  declare payerPhone?: string;
 
-  @Prop({ required: false, trim: true })
-  declare accountReference?: string | null;
+  @Prop({ required: false, type: Date })
+  declare transactionCompletedAt?: Date;
+
+  @Prop({ required: false })
+  declare resultCode?: number;
+
+  @Prop({ required: false })
+  declare resultDescription?: string;
+
+  @Prop({ required: false, type: Object })
+  declare rawCallback?: Record<string, unknown>;
+
+  @Prop({ required: false, type: Date })
+  declare lastCallbackAt?: Date;
+
 }
 
 export const DonationSchema = SchemaFactory.createForClass(DonationEntity);
+DonationSchema.index({ mpesaCheckoutRequestId: 1 }, { unique: true });
 
-DonationSchema.virtual("id").get(function (this: DonationEntity & { _id: unknown }) {
-  return String((this as { _id: { toString(): string } })._id);
-});
-
-DonationSchema.index({ idempotencyKeyHash: 1 }, { unique: true });
-DonationSchema.index({ mpesaCheckoutRequestId: 1 }, { unique: true, sparse: true });
-DonationSchema.index({ mpesaMerchantRequestId: 1 }, { unique: true, sparse: true });
-DonationSchema.index({ submissionId: 1 });
-DonationSchema.index({ donorUserId: 1 });

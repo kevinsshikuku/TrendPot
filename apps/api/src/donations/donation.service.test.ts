@@ -1,251 +1,194 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Model } from "mongoose";
-import type { DarajaClient } from "../mpesa/daraja.client";
-import type { DonationDocument } from "./donation.schema";
-import { DonationStatus } from "./donation.schema";
-import { DonationService } from "./donation.service";
+import { DonationService, MpesaStkPushCallbackPayload } from "./donation.service";
+import { DonationStatus } from "./donation-status.enum";
+import type { SignatureVerificationResult } from "../webhooks/mpesa-signature.service";
 
-type DonationDocLike = {
+interface DonationRecord {
   _id: string;
-  submissionId: string;
-  donorUserId: string;
+  mpesaCheckoutRequestId: string;
+  merchantRequestId?: string;
+  accountReference?: string;
   amountCents: number;
-  currency: string;
+  mpesaReceipt?: string;
+  payerPhone?: string;
+  transactionCompletedAt?: Date;
   status: DonationStatus;
-  statusHistory: Array<{ status: DonationStatus; occurredAt: Date; description?: string | null }>;
-  idempotencyKeyHash: string;
-  mpesaCheckoutRequestId: string | null;
-  mpesaMerchantRequestId: string | null;
-  failureReason: string | null;
-  lastResponseDescription: string | null;
-  accountReference: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-  __v: number;
-};
+  resultCode?: number;
+  resultDescription?: string;
+  rawCallback?: Record<string, unknown>;
+  lastCallbackAt?: Date;
+}
 
 class DonationModelStub {
-  readonly documents = new Map<string, DonationDocLike>();
-  private sequence = 0;
-
-  async create(input: Partial<DonationDocLike> & { idempotencyKeyHash: string }): Promise<DonationDocument> {
-    const id = `don-${++this.sequence}`;
-    const now = new Date("2024-01-01T00:00:00.000Z");
-    const doc: DonationDocLike = {
-      _id: id,
-      submissionId: String(input.submissionId ?? ""),
-      donorUserId: String(input.donorUserId ?? ""),
-      amountCents: input.amountCents ?? 0,
-      currency: input.currency ?? "KES",
-      status: input.status ?? DonationStatus.Pending,
-      statusHistory: structuredClone(input.statusHistory ?? []),
-      idempotencyKeyHash: input.idempotencyKeyHash,
-      mpesaCheckoutRequestId: input.mpesaCheckoutRequestId ?? null,
-      mpesaMerchantRequestId: input.mpesaMerchantRequestId ?? null,
-      failureReason: input.failureReason ?? null,
-      lastResponseDescription: input.lastResponseDescription ?? null,
-      accountReference: input.accountReference ?? null,
-      createdAt: now,
-      updatedAt: now,
-      __v: 0
-    };
-
-    this.documents.set(id, structuredClone(doc));
-
-    return {
-      _id: id,
-      __v: doc.__v,
-      toObject: () => structuredClone(doc)
-    } as unknown as DonationDocument;
-  }
+  private sequence = 1;
+  readonly documents = new Map<string, DonationRecord>();
 
   findOne(filter: Record<string, unknown>) {
-    const doc = this.findMatchingDoc(filter);
-    return {
-      lean: async () => (doc ? structuredClone(doc) : null)
+    const match = this.lookupByFilter(filter);
+    const query = {
+      session: () => query,
+      async exec() {
+        return match ? structuredClone(match) : null;
+      }
     };
+
+    return query;
   }
 
-  findById(id: unknown) {
-    const key = typeof id === "string" ? id : (id as { toString?: () => string })?.toString?.() ?? String(id);
-    const doc = this.documents.get(key);
-    return {
-      lean: async () => (doc ? structuredClone(doc) : null)
-    };
+  async create(inputs: Array<Partial<DonationRecord>>) {
+    return inputs.map((input) => {
+      const record: DonationRecord = {
+        _id: String(this.sequence++),
+        mpesaCheckoutRequestId: input.mpesaCheckoutRequestId ?? "",
+        merchantRequestId: input.merchantRequestId,
+        amountCents: input.amountCents ?? 0,
+        mpesaReceipt: input.mpesaReceipt,
+        payerPhone: input.payerPhone,
+        accountReference: input.accountReference,
+        transactionCompletedAt: input.transactionCompletedAt,
+        status: input.status ?? DonationStatus.Pending,
+        resultCode: input.resultCode,
+        resultDescription: input.resultDescription,
+        rawCallback: input.rawCallback,
+        lastCallbackAt: input.lastCallbackAt
+      };
+
+      this.documents.set(record.mpesaCheckoutRequestId, record);
+      return structuredClone(record);
+    });
   }
 
-  findOneAndUpdate(filter: Record<string, unknown>, update: Record<string, unknown>, options?: { new?: boolean }) {
-    const doc = this.findMatchingDoc(filter);
-    return {
-      lean: async () => {
-        if (!doc) {
+  findOneAndUpdate(filter: Record<string, unknown>, update: Record<string, unknown>) {
+    const match = this.lookupByFilter(filter);
+
+    const query = {
+      async exec() {
+        if (!match) {
           return null;
         }
-        const updated = this.applyUpdate(doc, update);
-        this.documents.set(doc._id, structuredClone(updated));
-        return options?.new ? structuredClone(updated) : structuredClone(doc);
+
+        const patched: DonationRecord = {
+          ...match,
+          ...(update.$set as Partial<DonationRecord>)
+        };
+
+        match.amountCents = patched.amountCents;
+        match.mpesaReceipt = patched.mpesaReceipt;
+        match.payerPhone = patched.payerPhone;
+        match.transactionCompletedAt = patched.transactionCompletedAt;
+        match.merchantRequestId = patched.merchantRequestId;
+        match.accountReference = patched.accountReference;
+        match.status = patched.status;
+        match.resultCode = patched.resultCode;
+        match.resultDescription = patched.resultDescription;
+        match.rawCallback = patched.rawCallback;
+        match.lastCallbackAt = patched.lastCallbackAt;
+
+        if (match.mpesaCheckoutRequestId) {
+          this.documents.set(match.mpesaCheckoutRequestId, match);
+        }
+
+        return structuredClone(match);
       }
     };
+
+    return query;
   }
 
-  private findMatchingDoc(filter: Record<string, unknown>) {
-    for (const doc of this.documents.values()) {
-      if (matchesFilter(doc, filter)) {
-        return doc;
-      }
-    }
-    return null;
-  }
-
-  private applyUpdate(doc: DonationDocLike, update: Record<string, unknown>) {
-    const next = structuredClone(doc);
-
-    if (update.$set && typeof update.$set === "object") {
-      for (const [key, value] of Object.entries(update.$set as Record<string, unknown>)) {
-        (next as Record<string, unknown>)[key] = value as never;
-      }
+  private lookupByFilter(filter: Record<string, unknown>) {
+    if (filter.mpesaCheckoutRequestId) {
+      return this.documents.get(String(filter.mpesaCheckoutRequestId));
     }
 
-    if (update.$push && typeof update.$push === "object") {
-      for (const [key, value] of Object.entries(update.$push as Record<string, unknown>)) {
-        const target = (next as Record<string, unknown>)[key];
-        if (Array.isArray(target)) {
-          target.push(structuredClone(value));
-        } else {
-          (next as Record<string, unknown>)[key] = [structuredClone(value)];
-        }
-      }
+    if (filter._id) {
+      const target = String(filter._id);
+      return Array.from(this.documents.values()).find((candidate) => candidate._id === target);
     }
 
-    if (update.$inc && typeof update.$inc === "object") {
-      for (const [key, value] of Object.entries(update.$inc as Record<string, unknown>)) {
-        if (typeof value === "number") {
-          const current = (next as Record<string, unknown>)[key];
-          (next as Record<string, unknown>)[key] = typeof current === "number" ? (current as number) + value : value;
-        }
-      }
-    }
-
-    if (update.$set && typeof update.$set === "object" && update.$set.updatedAt instanceof Date) {
-      next.updatedAt = update.$set.updatedAt;
-    }
-
-    return next;
+    return undefined;
   }
 }
 
-class DarajaClientStub {
-  readonly requests: Array<Record<string, unknown>> = [];
+class SessionStub {
+  async withTransaction(callback: () => Promise<void>) {
+    await callback();
+  }
 
-  async requestStkPush(payload: Record<string, unknown>) {
-    this.requests.push(payload);
-    return {
-      MerchantRequestID: "MERCHANT-123",
-      CheckoutRequestID: "CHECKOUT-123",
-      ResponseCode: "0",
-      ResponseDescription: "Success",
-      CustomerMessage: "Success"
-    };
+  async endSession() {}
+}
+
+class ConnectionStub {
+  async startSession() {
+    return new SessionStub();
   }
 }
 
-const createLogger = () => {
-  const calls: Record<string, unknown[]> = { info: [], warn: [], error: [] };
-  return {
-    info: (payload: unknown) => calls.info.push(payload),
-    warn: (payload: unknown) => calls.warn.push(payload),
-    error: (payload: unknown) => calls.error.push(payload),
-    child: () => createLogger(),
-    calls
-  };
-};
+class AuditLogServiceStub {
+  readonly entries: Array<Record<string, unknown>> = [];
 
-const matchesFilter = (doc: DonationDocLike, filter: Record<string, unknown>) => {
-  const entries = Object.entries(filter ?? {});
-  for (const [key, value] of entries) {
-    if (key === "_id") {
-      const compare = typeof value === "string" ? value : (value as { toString?: () => string })?.toString?.();
-      if (doc._id !== compare) {
-        return false;
-      }
-      continue;
-    }
-    if (key === "__v") {
-      if (doc.__v !== value) {
-        return false;
-      }
-      continue;
-    }
-    if ((doc as Record<string, unknown>)[key] !== value) {
-      return false;
-    }
+  async record(entry: Record<string, unknown>) {
+    this.entries.push(entry);
   }
-  return true;
-};
+}
 
-test("requestStkPush persists a donation and records Daraja checkout identifiers", async () => {
-  const model = new DonationModelStub();
-  const daraja = new DarajaClientStub();
-  const service = new DonationService(model as unknown as Model<DonationDocument>, daraja as unknown as DarajaClient);
-  const logger = createLogger();
-
-  const snapshot = await service.requestStkPush({
-    submissionId: "sub-1",
-    donorUserId: "user-1",
-    amountCents: 5_000,
-    msisdn: "+254700123456",
-    idempotencyKey: "msisdn-sub-1",
-    accountReference: "Community Sprint",
-    narrative: "Support the creator",
-    requestId: "req-1",
-    logger
-  });
-
-  assert.equal(snapshot.status, DonationStatus.Submitted);
-  assert.equal(snapshot.amountCents, 5_000);
-  assert.equal(snapshot.mpesaCheckoutRequestId, "CHECKOUT-123");
-  assert.equal(snapshot.mpesaMerchantRequestId, "MERCHANT-123");
-  assert.equal(snapshot.statusHistory.length, 2);
-  assert.deepEqual(
-    snapshot.statusHistory.map((entry) => entry.status),
-    [DonationStatus.Pending, DonationStatus.Submitted]
-  );
-  assert.equal(snapshot.version, 1);
-  assert.equal(daraja.requests.length, 1);
-  assert.equal(daraja.requests[0]?.amount, 50);
-  assert.equal(model.documents.size, 1);
+const createPayload = (overrides: Partial<MpesaStkPushCallbackPayload> = {}): MpesaStkPushCallbackPayload => ({
+  Body: {
+    stkCallback: {
+      MerchantRequestID: "merchant-1",
+      CheckoutRequestID: "checkout-123",
+      ResultCode: 0,
+      ResultDesc: "Processed",
+      CallbackMetadata: {
+        Item: [
+          { Name: "Amount", Value: 50 },
+          { Name: "MpesaReceiptNumber", Value: "ABCD1234" },
+          { Name: "PhoneNumber", Value: "254700111222" }
+        ]
+      },
+      ...overrides.Body?.stkCallback
+    }
+  },
+  ...overrides
 });
 
-test("requestStkPush returns the existing donation for duplicate idempotency keys", async () => {
+const verification: SignatureVerificationResult = { valid: true };
+
+const connection = new ConnectionStub();
+
+const buildService = (model: DonationModelStub, audit: AuditLogServiceStub) =>
+  new DonationService(connection as never, model as never, audit as never);
+
+test("DonationService processes new callbacks and records audit entries", async () => {
   const model = new DonationModelStub();
-  const daraja = new DarajaClientStub();
-  const service = new DonationService(model as unknown as Model<DonationDocument>, daraja as unknown as DarajaClient);
-  const logger = createLogger();
+  const audit = new AuditLogServiceStub();
+  const service = buildService(model, audit);
 
-  const first = await service.requestStkPush({
-    submissionId: "sub-2",
-    donorUserId: "user-2",
-    amountCents: 10_000,
-    msisdn: "0700123456",
-    idempotencyKey: "duplicate-key",
-    requestId: "req-2",
-    logger
+  const result = await service.processStkPushCallback(createPayload(), verification, {
+    rawEventId: "evt-1"
   });
 
-  const second = await service.requestStkPush({
-    submissionId: "sub-2",
-    donorUserId: "user-2",
-    amountCents: 20_000,
-    msisdn: "0700123456",
-    idempotencyKey: "duplicate-key",
-    requestId: "req-3",
-    logger
-  });
-
-  assert.equal(first.id, second.id);
-  assert.equal(daraja.requests.length, 1);
+  assert.equal(result.idempotentReplay, false);
   assert.equal(model.documents.size, 1);
-  assert.equal(second.amountCents, first.amountCents);
-  assert.equal(second.version, first.version);
+  assert.equal(audit.entries.length, 1);
+  assert.equal(audit.entries[0]?.outcome, "processed");
+});
+
+test("DonationService marks idempotent replays and avoids duplicate writes", async () => {
+  const model = new DonationModelStub();
+  const audit = new AuditLogServiceStub();
+  const service = buildService(model, audit);
+
+  await service.processStkPushCallback(createPayload(), verification, {
+    rawEventId: "evt-1"
+  });
+
+  const replay = await service.processStkPushCallback(createPayload(), verification, {
+    rawEventId: "evt-2"
+  });
+
+  assert.equal(replay.idempotentReplay, true);
+  assert.equal(model.documents.size, 1);
+  assert.equal(audit.entries.length, 2);
+  assert.equal(audit.entries[1]?.outcome, "duplicate");
 });
