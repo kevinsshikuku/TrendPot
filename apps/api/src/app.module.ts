@@ -20,7 +20,15 @@ import { structuredErrorFormatter } from "./observability/error-formatter";
 import { PlatformAuthModule } from "./platform-auth/platform-auth.module";
 import { PlatformAuthService } from "./platform-auth/platform-auth.service";
 import { TikTokModule } from "./tiktok/tiktok.module";
-
+import { DonationEntity, DonationSchema } from "./donations/donation.schema";
+import { DonationService } from "./donations/donation.service";
+import { MpesaWebhookController } from "./webhooks/mpesa.controller";
+import { MpesaSignatureService } from "./webhooks/mpesa-signature.service";
+import { MpesaCallbackQueue } from "./webhooks/mpesa-callback.queue";
+import { WebhookEventEntity, WebhookEventSchema } from "./webhooks/webhook-event.schema";
+import { AuditLogEntity, AuditLogSchema } from "./audit/audit-log.schema";
+import { AuditLogService } from "./audit/audit-log.service";
+import { RedisService } from "./redis/redis.service";
 @Module({
   imports: [
     GraphQLModule.forRootAsync<MercuriusDriverConfig>({
@@ -40,16 +48,26 @@ import { TikTokModule } from "./tiktok/tiktok.module";
       { name: ChallengeEntity.name, schema: ChallengeSchema },
       { name: TikTokAccountEntity.name, schema: TikTokAccountSchema },
       { name: VideoEntity.name, schema: VideoSchema },
-      { name: SubmissionEntity.name, schema: SubmissionSchema }
+      { name: SubmissionEntity.name, schema: SubmissionSchema },
+      { name: DonationEntity.name, schema: DonationSchema },
+      { name: WebhookEventEntity.name, schema: WebhookEventSchema },
+      { name: AuditLogEntity.name, schema: AuditLogSchema }
     ]),
     PlatformAuthModule,
-    TikTokModule
+    TikTokModule,
+    DonationsModule
   ],
+  controllers: [MpesaWebhookController],
   providers: [
     AppService,
     ChallengeResolver,
     HealthResolver,
     AuthResolver,
+    DonationService,
+    MpesaSignatureService,
+    MpesaCallbackQueue,
+    AuditLogService,
+    RedisService,
     {
       provide: APP_GUARD,
       useClass: ProfileCompletionGuard

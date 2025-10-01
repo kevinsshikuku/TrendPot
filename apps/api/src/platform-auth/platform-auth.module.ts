@@ -3,6 +3,7 @@ import { MongooseModule } from "@nestjs/mongoose";
 import { AuthAuditService } from "../auth/auth-audit.service";
 import { RateLimitService } from "../auth/rate-limit.service";
 import { RedisService } from "../redis/redis.service";
+import { TikTokTokenCipherProvider } from "../security/tiktok-token.providers";
 import { TikTokTokenService } from "../security/tiktok-token.service";
 import { TikTokIngestionQueue } from "../tiktok/tiktok-ingestion.queue";
 import { PlatformAuthService } from "./platform-auth.service";
@@ -29,6 +30,7 @@ import { TikTokAccountEntity, TikTokAccountSchema } from "../models/tiktok-accou
     RateLimitService,
     AuthAuditService,
     RedisService,
+    TikTokTokenCipherProvider,
     TikTokTokenService,
     TikTokIngestionQueue
   ],
@@ -38,6 +40,7 @@ import { TikTokAccountEntity, TikTokAccountSchema } from "../models/tiktok-accou
     RateLimitService,
     AuthAuditService,
     RedisService,
+    TikTokTokenCipherProvider,
     TikTokTokenService,
     TikTokIngestionQueue
   ]

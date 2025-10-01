@@ -4,7 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Button, Card, CardContent, CardFooter, CardHeader } from "@trendpot/ui";
 import { startTikTokLogin } from "@/lib/auth-client";
-import { launchTikTokLogin } from "@/lib/tiktok-open-sdk";
+import { launchTikTokLogin, loadTikTokOpenSDK } from "@/lib/tiktok-open-sdk";
 
 function resolveDeviceLabel() {
   if (typeof navigator === "undefined") {
@@ -29,6 +29,8 @@ export function LoginForm({ nextPath }: LoginFormProps) {
     mutationFn: async () => {
       setStatus("Contacting TikTok…");
       const { intent } = await startTikTokLogin({ returnPath: nextPath, deviceLabel });
+      setStatus("Preparing TikTok login…");
+      await loadTikTokOpenSDK(intent.clientKey);
       setStatus("Redirecting to TikTok…");
       await launchTikTokLogin(intent);
     },

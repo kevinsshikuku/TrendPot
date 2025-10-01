@@ -1,11 +1,11 @@
 import { z } from "zod";
-
 export const donationStatusSchema = z.enum([
   "pending",
   "processing",
   "succeeded",
   "failed"
 ]);
+
 
 export const donationSchema = z.object({
   id: z.string(),
@@ -56,3 +56,4 @@ export type DonationHistoryEntry = z.infer<typeof donationHistoryEntrySchema>;
 export type DonationHistoryList = z.infer<typeof donationHistoryListSchema>;
 export type DonationChallengeContext = z.infer<typeof donationChallengeContextSchema>;
 export type DonationSubmissionContext = z.infer<typeof donationSubmissionContextSchema>;
+
