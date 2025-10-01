@@ -4,6 +4,7 @@ import { Types } from "mongoose";
 
 import { PlatformAuthService } from "./platform-auth.service";
 import type { TikTokAccountDocument } from "../models/tiktok-account.schema";
+import { TikTokTokenCipher } from "@trendpot/utils";
 import { TikTokTokenService } from "../security/tiktok-token.service";
 import type { TikTokIngestionQueue } from "../tiktok/tiktok-ingestion.queue";
 
@@ -14,7 +15,9 @@ const createLogger = () => ({
 });
 
 test("upsertTikTokAccount enqueues an initial sync for linked users", async () => {
-  const tokenService = new TikTokTokenService();
+  const tokenService = new TikTokTokenService(
+    new TikTokTokenCipher({ key: Buffer.alloc(32, 2).toString("base64"), keyId: "test-key" })
+  );
   const encryptedAccess = tokenService.encrypt("access-token");
   const encryptedRefresh = tokenService.encrypt("refresh-token");
 
@@ -91,7 +94,9 @@ test("upsertTikTokAccount enqueues an initial sync for linked users", async () =
 });
 
 test("upsertTikTokAccount logs a warning when user id cannot be resolved", async () => {
-  const tokenService = new TikTokTokenService();
+  const tokenService = new TikTokTokenService(
+    new TikTokTokenCipher({ key: Buffer.alloc(32, 3).toString("base64"), keyId: "test-key" })
+  );
   const encryptedAccess = tokenService.encrypt("access-token");
   const encryptedRefresh = tokenService.encrypt("refresh-token");
 
