@@ -24,3 +24,4 @@ export const withRetries = async <T>(fn: () => Promise<T>, options: RetryOptions
 
 export * from "./aes-gcm-cipher";
 export * from "./tiktok-token-crypto";
+export * from "./tiktok-token-key-provider";

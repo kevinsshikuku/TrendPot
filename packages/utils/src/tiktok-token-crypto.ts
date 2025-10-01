@@ -1,3 +1,4 @@
+
 import { AesGcmCipher, type AesGcmCipherOptions, type EncryptedSecret } from "./aes-gcm-cipher";
 
 export interface TikTokEncryptedSecret extends EncryptedSecret {}

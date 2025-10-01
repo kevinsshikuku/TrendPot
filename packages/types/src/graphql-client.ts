@@ -11,7 +11,6 @@ import type { TikTokLoginIntent, Viewer, ViewerSession, User } from "./auth";
 import { donationSchema } from "./donations";
 import type { Donation } from "./donations";
 
-
 export interface TrendPotGraphQLClientOptions {
   baseUrl: string;
   fetchImplementation?: typeof fetch;
@@ -59,7 +58,6 @@ export interface ArchiveChallengeInput {
   id: string;
   expectedVersion: number;
 }
-
 export interface RequestDonationInput {
   submissionId: string;
   amountCents: number;
@@ -386,6 +384,121 @@ const CHALLENGE_ADMIN_LIST_QUERY = /* GraphQL */ `
         }
       }
     }
+  }
+`;
+
+const creatorDonationsDataSchema = z.object({
+  creatorDonations: creatorDonationConnectionSchema
+});
+
+const CREATOR_DONATIONS_QUERY = /* GraphQL */ `
+  query CreatorDonations($first: Int, $after: String) {
+    creatorDonations(first: $first, after: $after) {
+      edges {
+        cursor
+        node {
+          id
+          status
+          payoutState
+          amountCents
+          netAmountCents
+          currency
+          donatedAt
+          availableAt
+          supporterName
+          challengeTitle
+          payoutBatchId
+        }
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+      stats {
+        lifetimeAmountCents
+        lifetimeDonationCount
+        pendingAmountCents
+        availableAmountCents
+      }
+      trend {
+        date
+        amountCents
+      }
+    }
+  }
+`;
+
+const payoutBatchesDataSchema = z.object({
+  payoutBatches: payoutBatchConnectionSchema
+});
+
+const PAYOUT_BATCHES_QUERY = /* GraphQL */ `
+  query PayoutBatches($first: Int, $after: String) {
+    payoutBatches(first: $first, after: $after) {
+      edges {
+        cursor
+        node {
+          id
+          status
+          scheduledFor
+          completedAt
+          startedAt
+          donationCount
+          totalAmountCents
+          netAmountCents
+          currency
+          periodStart
+          periodEnd
+          failureReason
+        }
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+const payoutNotificationsDataSchema = z.object({
+  payoutNotificationFeed: payoutNotificationConnectionSchema
+});
+
+const PAYOUT_NOTIFICATION_FEED_QUERY = /* GraphQL */ `
+  query PayoutNotificationFeed($first: Int, $after: String) {
+    payoutNotificationFeed(first: $first, after: $after) {
+      edges {
+        cursor
+        node {
+          id
+          type
+          message
+          createdAt
+          eventAt
+          readAt
+          metadata {
+            donationId
+            payoutBatchId
+            amountCents
+            currency
+          }
+        }
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+const markPayoutNotificationsReadDataSchema = z.object({
+  markPayoutNotificationsRead: z.number().int().nonnegative()
+});
+
+const MARK_PAYOUT_NOTIFICATIONS_READ_MUTATION = /* GraphQL */ `
+  mutation MarkPayoutNotificationsRead($ids: [String!]!) {
+    markPayoutNotificationsRead(ids: $ids)
   }
 `;
 
@@ -766,6 +879,7 @@ export class TrendPotGraphQLClient {
       query: REQUEST_STK_PUSH_MUTATION,
       variables: { input },
       parser: (payload) => requestStkPushDataSchema.parse(payload).requestStkPush,
+
       init: options.init
     });
 
@@ -788,7 +902,6 @@ export class TrendPotGraphQLClient {
 
     return result.data;
   }
-
   async getDonationByCheckout(
     checkoutRequestId: string,
     options: GraphQLOperationOptions = {}
@@ -827,7 +940,8 @@ export class TrendPotGraphQLClient {
     const result = await this.performGraphQLRequest<TikTokLoginIntent>({
       query: START_TIKTOK_LOGIN_MUTATION,
       variables,
-      parser: (payload) => startTikTokLoginDataSchema.parse(payload).startTikTokLogin,
+      parser: (payload): TikTokLoginIntent =>
+        startTikTokLoginDataSchema.parse(payload).startTikTokLogin,
       init: options.init
     });
 

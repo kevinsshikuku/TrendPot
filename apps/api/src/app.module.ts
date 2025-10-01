@@ -21,7 +21,6 @@ import { PlatformAuthModule } from "./platform-auth/platform-auth.module";
 import { PlatformAuthService } from "./platform-auth/platform-auth.service";
 import { TikTokModule } from "./tiktok/tiktok.module";
 import { DonationsModule } from "./donations/donations.module";
-
 @Module({
   imports: [
     GraphQLModule.forRootAsync<MercuriusDriverConfig>({
