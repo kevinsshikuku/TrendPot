@@ -6,8 +6,18 @@ import {
 } from "./challenges";
 import type { ChallengeList } from "./challenges";
 import type { Challenge } from "./challenges";
-import { viewerSchema, viewerSessionSchema, userSchema } from "./auth";
+import { viewerSchema, viewerSessionSchema, userSchema, tiktokLoginIntentSchema } from "./auth";
 import type { TikTokLoginIntent, Viewer, ViewerSession, User } from "./auth";
+import {
+  creatorDonationConnectionSchema,
+  payoutBatchConnectionSchema,
+  payoutNotificationConnectionSchema
+} from "./payouts";
+import type {
+  CreatorDonationConnection,
+  PayoutBatchConnection,
+  PayoutNotificationConnection
+} from "./payouts";
 
 
 export interface TrendPotGraphQLClientOptions {
@@ -56,6 +66,21 @@ export interface UpdateChallengeInput {
 export interface ArchiveChallengeInput {
   id: string;
   expectedVersion: number;
+}
+
+export interface CreatorDonationsRequest {
+  first?: number;
+  after?: string;
+}
+
+export interface PayoutBatchesRequest {
+  first?: number;
+  after?: string;
+}
+
+export interface PayoutNotificationsRequest {
+  first?: number;
+  after?: string;
 }
 
 export interface GraphQLOperationOptions {
@@ -285,6 +310,121 @@ const CHALLENGE_ADMIN_LIST_QUERY = /* GraphQL */ `
         }
       }
     }
+  }
+`;
+
+const creatorDonationsDataSchema = z.object({
+  creatorDonations: creatorDonationConnectionSchema
+});
+
+const CREATOR_DONATIONS_QUERY = /* GraphQL */ `
+  query CreatorDonations($first: Int, $after: String) {
+    creatorDonations(first: $first, after: $after) {
+      edges {
+        cursor
+        node {
+          id
+          status
+          payoutState
+          amountCents
+          netAmountCents
+          currency
+          donatedAt
+          availableAt
+          supporterName
+          challengeTitle
+          payoutBatchId
+        }
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+      stats {
+        lifetimeAmountCents
+        lifetimeDonationCount
+        pendingAmountCents
+        availableAmountCents
+      }
+      trend {
+        date
+        amountCents
+      }
+    }
+  }
+`;
+
+const payoutBatchesDataSchema = z.object({
+  payoutBatches: payoutBatchConnectionSchema
+});
+
+const PAYOUT_BATCHES_QUERY = /* GraphQL */ `
+  query PayoutBatches($first: Int, $after: String) {
+    payoutBatches(first: $first, after: $after) {
+      edges {
+        cursor
+        node {
+          id
+          status
+          scheduledFor
+          completedAt
+          startedAt
+          donationCount
+          totalAmountCents
+          netAmountCents
+          currency
+          periodStart
+          periodEnd
+          failureReason
+        }
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+const payoutNotificationsDataSchema = z.object({
+  payoutNotificationFeed: payoutNotificationConnectionSchema
+});
+
+const PAYOUT_NOTIFICATION_FEED_QUERY = /* GraphQL */ `
+  query PayoutNotificationFeed($first: Int, $after: String) {
+    payoutNotificationFeed(first: $first, after: $after) {
+      edges {
+        cursor
+        node {
+          id
+          type
+          message
+          createdAt
+          eventAt
+          readAt
+          metadata {
+            donationId
+            payoutBatchId
+            amountCents
+            currency
+          }
+        }
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+const markPayoutNotificationsReadDataSchema = z.object({
+  markPayoutNotificationsRead: z.number().int().nonnegative()
+});
+
+const MARK_PAYOUT_NOTIFICATIONS_READ_MUTATION = /* GraphQL */ `
+  mutation MarkPayoutNotificationsRead($ids: [String!]!) {
+    markPayoutNotificationsRead(ids: $ids)
   }
 `;
 
@@ -660,6 +800,96 @@ export class TrendPotGraphQLClient {
     return result.data;
   }
 
+  async getCreatorDonations(
+    params: CreatorDonationsRequest = {},
+    options: GraphQLOperationOptions = {}
+  ): Promise<CreatorDonationConnection> {
+    const variables: Record<string, unknown> = {};
+
+    if (typeof params.first === "number" && Number.isFinite(params.first) && params.first > 0) {
+      variables.first = Math.floor(params.first);
+    }
+
+    if (params.after && params.after.length > 0) {
+      variables.after = params.after;
+    }
+
+    const result = await this.performGraphQLRequest({
+      query: CREATOR_DONATIONS_QUERY,
+      variables: Object.keys(variables).length > 0 ? variables : undefined,
+      parser: (payload) => creatorDonationsDataSchema.parse(payload).creatorDonations,
+      init: options.init
+    });
+
+    return result.data;
+  }
+
+  async getPayoutBatches(
+    params: PayoutBatchesRequest = {},
+    options: GraphQLOperationOptions = {}
+  ): Promise<PayoutBatchConnection> {
+    const variables: Record<string, unknown> = {};
+
+    if (typeof params.first === "number" && Number.isFinite(params.first) && params.first > 0) {
+      variables.first = Math.floor(params.first);
+    }
+
+    if (params.after && params.after.length > 0) {
+      variables.after = params.after;
+    }
+
+    const result = await this.performGraphQLRequest({
+      query: PAYOUT_BATCHES_QUERY,
+      variables: Object.keys(variables).length > 0 ? variables : undefined,
+      parser: (payload) => payoutBatchesDataSchema.parse(payload).payoutBatches,
+      init: options.init
+    });
+
+    return result.data;
+  }
+
+  async getPayoutNotificationFeed(
+    params: PayoutNotificationsRequest = {},
+    options: GraphQLOperationOptions = {}
+  ): Promise<PayoutNotificationConnection> {
+    const variables: Record<string, unknown> = {};
+
+    if (typeof params.first === "number" && Number.isFinite(params.first) && params.first > 0) {
+      variables.first = Math.floor(params.first);
+    }
+
+    if (params.after && params.after.length > 0) {
+      variables.after = params.after;
+    }
+
+    const result = await this.performGraphQLRequest({
+      query: PAYOUT_NOTIFICATION_FEED_QUERY,
+      variables: Object.keys(variables).length > 0 ? variables : undefined,
+      parser: (payload) => payoutNotificationsDataSchema.parse(payload).payoutNotificationFeed,
+      init: options.init
+    });
+
+    return result.data;
+  }
+
+  async markPayoutNotificationsRead(
+    ids: string[],
+    options: GraphQLOperationOptions = {}
+  ): Promise<number> {
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return 0;
+    }
+
+    const result = await this.performGraphQLRequest({
+      query: MARK_PAYOUT_NOTIFICATIONS_READ_MUTATION,
+      variables: { ids },
+      parser: (payload) => markPayoutNotificationsReadDataSchema.parse(payload).markPayoutNotificationsRead,
+      init: options.init
+    });
+
+    return result.data;
+  }
+
   async getViewer(options: GraphQLOperationOptions = {}): Promise<Viewer> {
     const result = await this.performGraphQLRequest({
       query: VIEWER_QUERY,
@@ -675,10 +905,11 @@ export class TrendPotGraphQLClient {
     options: GraphQLOperationOptions = {}
   ): Promise<TikTokLoginIntent> {
     const variables = input ? { input } : {};
-    const result = await this.performGraphQLRequest({
+    const result = await this.performGraphQLRequest<TikTokLoginIntent>({
       query: START_TIKTOK_LOGIN_MUTATION,
       variables,
-      parser: (payload) => startTikTokLoginDataSchema.parse(payload).startTikTokLogin,
+      parser: (payload): TikTokLoginIntent =>
+        startTikTokLoginDataSchema.parse(payload).startTikTokLogin,
       init: options.init
     });
 
@@ -765,13 +996,6 @@ export class TrendPotGraphQLClient {
     });
 
     return result.data;
-  }
-
-  async getViewer(): Promise<Viewer> {
-    return this.executeGraphQL({
-      query: VIEWER_QUERY,
-      parser: (payload) => viewerDataSchema.parse(payload).viewer
-    });
   }
 
   private prepareListVariables(params: ListChallengesParams) {

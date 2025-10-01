@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiClient, GraphQLRequestError } from "@/lib/api-client";
+import { getConfiguredTikTokScopes } from "@/lib/tiktok-scopes";
 
 export async function POST(request: Request) {
   try {
@@ -10,7 +11,9 @@ export async function POST(request: Request) {
       deviceLabel?: string;
     };
 
-    const intent = await apiClient.startTikTokLogin(body, {
+    const scopes = Array.isArray(body.scopes) && body.scopes.length > 0 ? [...body.scopes] : getConfiguredTikTokScopes();
+
+    const intent = await apiClient.startTikTokLogin({ ...body, scopes }, {
       init: { headers: { "x-requested-with": "nextjs" } }
     });
 

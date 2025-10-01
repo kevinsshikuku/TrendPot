@@ -84,8 +84,6 @@ interface TikTokVideoListResponse {
   };
 }
 
-const tokenCipher = new TikTokTokenCipher();
-
 const safeParseJson = async (response: Response) => {
   try {
     return await response.json();
@@ -94,38 +92,44 @@ const safeParseJson = async (response: Response) => {
   }
 };
 
-const decryptAccountToken = (token: TikTokAccountRecord["accessToken"], keyId: string): string => {
-  return tokenCipher.decrypt(mapAccountTokenToEncryptedSecret(token), { keyId });
+const decryptAccountToken = (
+  cipher: TikTokTokenCipher,
+  token: TikTokAccountRecord["accessToken"],
+  keyId: string
+): string => {
+  return cipher.decrypt(mapAccountTokenToEncryptedSecret(token), { keyId });
 };
 
 const ensureValidAccessToken = async (
   account: TikTokAccountRecord,
   db: Awaited<ReturnType<typeof getMongoDb>>,
   logger: Logger,
-  requestId?: string
+  requestId: string | undefined,
+  cipher: TikTokTokenCipher
 ): Promise<{ accessToken: string; account: TikTokAccountRecord }> => {
   const now = Date.now();
   const expiry = new Date(account.accessTokenExpiresAt).getTime();
-  const accessToken = decryptAccountToken(account.accessToken, account.accessToken.keyId);
+  const accessToken = decryptAccountToken(cipher, account.accessToken, account.accessToken.keyId);
 
   if (expiry > now + TOKEN_EXPIRY_BUFFER_MS) {
     return { accessToken, account };
   }
 
-  return refreshAccessToken(account, db, logger, requestId);
+  return refreshAccessToken(account, db, logger, requestId, cipher);
 };
 
 const refreshAccessToken = async (
   account: TikTokAccountRecord,
   db: Awaited<ReturnType<typeof getMongoDb>>,
   logger: Logger,
-  requestId?: string
+  requestId: string | undefined,
+  cipher: TikTokTokenCipher
 ): Promise<{ accessToken: string; account: TikTokAccountRecord }> => {
   if (!CLIENT_KEY || !CLIENT_SECRET) {
     throw new Error("TikTok Display API credentials are not configured");
   }
 
-  const refreshToken = decryptAccountToken(account.refreshToken, account.refreshToken.keyId);
+  const refreshToken = decryptAccountToken(cipher, account.refreshToken, account.refreshToken.keyId);
   logger.info(
     { event: "tiktok.token.refresh", accountId: account._id.toHexString(), requestId },
     "Refreshing TikTok access token"
@@ -177,8 +181,8 @@ const refreshAccessToken = async (
     throw new Error("TikTok did not return refreshed credentials");
   }
 
-  const encryptedAccess = tokenCipher.encrypt(data.access_token);
-  const encryptedRefresh = tokenCipher.encrypt(data.refresh_token);
+  const encryptedAccess = cipher.encrypt(data.access_token);
+  const encryptedRefresh = cipher.encrypt(data.refresh_token);
   const accessTokenExpiresAt = new Date(Date.now() + data.expires_in * 1000);
   const refreshTokenExpiresAt = new Date(Date.now() + data.refresh_expires_in * 1000);
   const accounts = db.collection<TikTokAccountRecord>("tiktok_accounts");
@@ -190,13 +194,13 @@ const refreshAccessToken = async (
     {
       $set: {
         accessToken: {
-          keyId: tokenCipher.keyId,
+          keyId: cipher.keyId,
           ciphertext: encryptedAccess.ciphertext,
           iv: encryptedAccess.iv,
           authTag: encryptedAccess.authTag
         },
         refreshToken: {
-          keyId: tokenCipher.keyId,
+          keyId: cipher.keyId,
           ciphertext: encryptedRefresh.ciphertext,
           iv: encryptedRefresh.iv,
           authTag: encryptedRefresh.authTag
@@ -228,13 +232,13 @@ const refreshAccessToken = async (
   );
 
   account.accessToken = {
-    keyId: tokenCipher.keyId,
+    keyId: cipher.keyId,
     ciphertext: encryptedAccess.ciphertext,
     iv: encryptedAccess.iv,
     authTag: encryptedAccess.authTag
   } as TikTokAccountRecord["accessToken"];
   account.refreshToken = {
-    keyId: tokenCipher.keyId,
+    keyId: cipher.keyId,
     ciphertext: encryptedRefresh.ciphertext,
     iv: encryptedRefresh.iv,
     authTag: encryptedRefresh.authTag
@@ -387,9 +391,10 @@ const publishVideoUpdate = async (
 export const createInitialSyncJobHandler = (options: {
   refreshQueue: Queue<TikTokMetricsRefreshJob>;
   redisPublisher: IORedis;
+  tokenCipher: TikTokTokenCipher;
   getMongoDb?: typeof getMongoDb;
 }) => {
-  const { refreshQueue, redisPublisher, getMongoDb: resolveMongoDb = getMongoDb } = options;
+  const { refreshQueue, redisPublisher, tokenCipher, getMongoDb: resolveMongoDb = getMongoDb } = options;
 
   return async (job: Job<TikTokInitialSyncJob>) => {
     const data = tiktokInitialSyncJobSchema.parse(job.data);
@@ -412,7 +417,7 @@ export const createInitialSyncJobHandler = (options: {
     }
 
     try {
-      const { accessToken } = await ensureValidAccessToken(account, db, logger, data.requestId);
+      const { accessToken } = await ensureValidAccessToken(account, db, logger, data.requestId, tokenCipher);
       const videos = await fetchCreatorVideos(accessToken, logger, data.requestId);
       const now = new Date();
       let upserted = 0;
@@ -525,9 +530,10 @@ export const createInitialSyncJobHandler = (options: {
 
 export const createMetricsRefreshJobHandler = (options: {
   redisPublisher: IORedis;
+  tokenCipher: TikTokTokenCipher;
   getMongoDb?: typeof getMongoDb;
 }) => {
-  const { redisPublisher, getMongoDb: resolveMongoDb = getMongoDb } = options;
+  const { redisPublisher, tokenCipher, getMongoDb: resolveMongoDb = getMongoDb } = options;
 
   return async (job: Job<TikTokMetricsRefreshJob>) => {
     const data = tiktokMetricsRefreshJobSchema.parse(job.data);
@@ -550,7 +556,7 @@ export const createMetricsRefreshJobHandler = (options: {
     }
 
     try {
-      const { accessToken } = await ensureValidAccessToken(account, db, logger, data.requestId);
+      const { accessToken } = await ensureValidAccessToken(account, db, logger, data.requestId, tokenCipher);
       const videoDocs = await videosCollection
         .find({ ownerTikTokAccountId: accountObjectId })
         .project<{ tiktokVideoId: string }>({ tiktokVideoId: 1 })

@@ -7,7 +7,7 @@ import {
 
 @Injectable()
 export class TikTokTokenService {
-  private readonly cipher = new TikTokTokenCipher();
+  constructor(private readonly cipher: TikTokTokenCipher) {}
 
   get keyId(): string {
     return this.cipher.keyId;
