@@ -9,7 +9,7 @@ const shimBase = new URL("./", import.meta.url);
 const shimMap = new Map([
   ["@nestjs/common", new URL("@nestjs/common/index.js", shimBase).href],
   ["@nestjs/mongoose", new URL("@nestjs/mongoose/index.js", shimBase).href],
-  ["@nestjs/graphql", new URL("@nestjs/graphql/index.js", shimBase).href],
+  ["@nestjs/graphql", new URL("@nestjs/graphql/index.mjs", shimBase).href],
   ["@nestjs/mercurius", new URL("@nestjs/mercurius/index.js", shimBase).href],
   ["@nestjs/platform-fastify", new URL("@nestjs/platform-fastify/index.js", shimBase).href],
   ["@fastify/cors", new URL("@fastify/cors/index.js", shimBase).href],

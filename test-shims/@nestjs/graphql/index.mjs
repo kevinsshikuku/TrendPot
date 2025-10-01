@@ -1,16 +1,17 @@
 const decorator = () => () => undefined;
-const Resolver = decorator;
-const Query = decorator;
-const Mutation = decorator;
-const Args = decorator;
-const ObjectType = decorator;
-const Field = decorator;
-const InputType = decorator;
-const Int = {};
-const Float = {};
-const GraphQLISODateTime = {};
 
-class GqlExecutionContext {
+export const Resolver = decorator;
+export const Query = decorator;
+export const Mutation = decorator;
+export const Args = decorator;
+export const ObjectType = decorator;
+export const Field = decorator;
+export const InputType = decorator;
+export const Int = {};
+export const Float = {};
+export const GraphQLISODateTime = {};
+
+export class GqlExecutionContext {
   constructor(payload) {
     this.payload = payload ?? { context: {}, info: {} };
   }
@@ -37,7 +38,9 @@ class GqlExecutionContext {
   }
 }
 
-module.exports = {
+export const registerEnumType = () => undefined;
+
+const defaultExport = {
   Resolver,
   Query,
   Mutation,
@@ -49,7 +52,7 @@ module.exports = {
   Float,
   GraphQLISODateTime,
   GqlExecutionContext,
-  registerEnumType: () => undefined
+  registerEnumType
 };
 
-module.exports.default = module.exports;
+export default defaultExport;
