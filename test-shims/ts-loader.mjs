@@ -13,6 +13,7 @@ const shimMap = new Map([
   ["@nestjs/mercurius", new URL("@nestjs/mercurius/index.js", shimBase).href],
   ["@nestjs/platform-fastify", new URL("@nestjs/platform-fastify/index.js", shimBase).href],
   ["@fastify/cors", new URL("@fastify/cors/index.js", shimBase).href],
+  ["@fastify/helmet", new URL("@fastify/helmet/index.js", shimBase).href],
   ["mongoose", new URL("mongoose/index.js", shimBase).href],
   ["@trendpot/types", new URL("@trendpot/types/index.js", shimBase).href],
   ["@trendpot/utils", new URL("@trendpot/utils/index.js", shimBase).href],

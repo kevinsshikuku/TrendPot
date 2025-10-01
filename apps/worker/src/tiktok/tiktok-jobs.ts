@@ -272,33 +272,62 @@ const fetchCreatorVideos = async (
   logger: Logger,
   requestId?: string
 ): Promise<TikTokDisplayVideo[]> => {
-  const response = await callDisplayApi<TikTokVideoListResponse>(
-    DISPLAY_VIDEO_LIST_PATH,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`
-      },
-      body: JSON.stringify({
-        cursor: null,
-        max_count: PAGE_SIZE
-      })
-    },
-    logger,
-    requestId,
-    { operation: "video.list" }
-  );
+  const videos: TikTokDisplayVideo[] = [];
+  let cursor: string | null = null;
+  let hasMore = true;
+  const seenCursors = new Set<string>();
 
-  if (response.error) {
-    logger.error(
-      { event: "tiktok.video.list_error", error: response.error, requestId },
-      "TikTok returned an error when listing videos"
+  while (hasMore) {
+    const response = await callDisplayApi<TikTokVideoListResponse>(
+      DISPLAY_VIDEO_LIST_PATH,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          cursor,
+          max_count: PAGE_SIZE
+        })
+      },
+      logger,
+      requestId,
+      { operation: "video.list" }
     );
-    throw new Error("TikTok returned an error when listing videos");
+
+    if (response.error) {
+      logger.error(
+        { event: "tiktok.video.list_error", error: response.error, requestId },
+        "TikTok returned an error when listing videos"
+      );
+      throw new Error("TikTok returned an error when listing videos");
+    }
+
+    const page = response.data?.videos ?? [];
+    videos.push(...page);
+
+    const nextCursor = response.data?.cursor ?? null;
+    hasMore = Boolean(response.data?.has_more && nextCursor);
+
+    if (!hasMore) {
+      break;
+    }
+
+    const cursorKey = nextCursor ?? "";
+    if (seenCursors.has(cursorKey)) {
+      logger.warn(
+        { event: "tiktok.video.duplicate_cursor", cursor: nextCursor, requestId },
+        "TikTok returned a duplicate cursor; stopping pagination"
+      );
+      break;
+    }
+
+    seenCursors.add(cursorKey);
+    cursor = nextCursor;
   }
 
-  return response.data?.videos ?? [];
+  return videos;
 };
 
 const fetchVideoMetrics = async (
