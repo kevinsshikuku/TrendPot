@@ -8,17 +8,8 @@ import type { ChallengeList } from "./challenges";
 import type { Challenge } from "./challenges";
 import { viewerSchema, viewerSessionSchema, userSchema, tiktokLoginIntentSchema } from "./auth";
 import type { TikTokLoginIntent, Viewer, ViewerSession, User } from "./auth";
-import {
-  creatorDonationConnectionSchema,
-  payoutBatchConnectionSchema,
-  payoutNotificationConnectionSchema
-} from "./payouts";
-import type {
-  CreatorDonationConnection,
-  PayoutBatchConnection,
-  PayoutNotificationConnection
-} from "./payouts";
-
+import { donationSchema } from "./donations";
+import type { Donation } from "./donations";
 
 export interface TrendPotGraphQLClientOptions {
   baseUrl: string;
@@ -67,20 +58,13 @@ export interface ArchiveChallengeInput {
   id: string;
   expectedVersion: number;
 }
-
-export interface CreatorDonationsRequest {
-  first?: number;
-  after?: string;
-}
-
-export interface PayoutBatchesRequest {
-  first?: number;
-  after?: string;
-}
-
-export interface PayoutNotificationsRequest {
-  first?: number;
-  after?: string;
+export interface RequestDonationInput {
+  submissionId: string;
+  amountCents: number;
+  msisdn: string;
+  idempotencyKey: string;
+  accountReference?: string;
+  narrative?: string;
 }
 
 export interface GraphQLOperationOptions {
@@ -247,6 +231,96 @@ const CHALLENGE_QUERY = /* GraphQL */ `
           hasNextPage
         }
       }
+    }
+  }
+`;
+
+const donationDataSchema = z.object({
+  donation: donationSchema.nullable()
+});
+
+const DONATION_QUERY = /* GraphQL */ `
+  query Donation($id: String!) {
+    donation(id: $id) {
+      id
+      submissionId
+      donorUserId
+      amountCents
+      currency
+      status
+      statusHistory {
+        status
+        occurredAt
+        description
+      }
+      mpesaCheckoutRequestId
+      mpesaMerchantRequestId
+      failureReason
+      lastResponseDescription
+      accountReference
+      createdAt
+      updatedAt
+      version
+    }
+  }
+`;
+
+const donationByCheckoutDataSchema = z.object({
+  donationByCheckout: donationSchema.nullable()
+});
+
+const DONATION_BY_CHECKOUT_QUERY = /* GraphQL */ `
+  query DonationByCheckout($checkoutRequestId: String!) {
+    donationByCheckout(checkoutRequestId: $checkoutRequestId) {
+      id
+      submissionId
+      donorUserId
+      amountCents
+      currency
+      status
+      statusHistory {
+        status
+        occurredAt
+        description
+      }
+      mpesaCheckoutRequestId
+      mpesaMerchantRequestId
+      failureReason
+      lastResponseDescription
+      accountReference
+      createdAt
+      updatedAt
+      version
+    }
+  }
+`;
+
+const requestStkPushDataSchema = z.object({
+  requestStkPush: donationSchema
+});
+
+const REQUEST_STK_PUSH_MUTATION = /* GraphQL */ `
+  mutation RequestStkPush($input: RequestDonationInput!) {
+    requestStkPush(input: $input) {
+      id
+      submissionId
+      donorUserId
+      amountCents
+      currency
+      status
+      statusHistory {
+        status
+        occurredAt
+        description
+      }
+      mpesaCheckoutRequestId
+      mpesaMerchantRequestId
+      failureReason
+      lastResponseDescription
+      accountReference
+      createdAt
+      updatedAt
+      version
     }
   }
 `;
@@ -800,90 +874,48 @@ export class TrendPotGraphQLClient {
     return result.data;
   }
 
-  async getCreatorDonations(
-    params: CreatorDonationsRequest = {},
-    options: GraphQLOperationOptions = {}
-  ): Promise<CreatorDonationConnection> {
-    const variables: Record<string, unknown> = {};
-
-    if (typeof params.first === "number" && Number.isFinite(params.first) && params.first > 0) {
-      variables.first = Math.floor(params.first);
-    }
-
-    if (params.after && params.after.length > 0) {
-      variables.after = params.after;
-    }
-
+  async requestStkPush(input: RequestDonationInput, options: GraphQLOperationOptions = {}): Promise<Donation> {
     const result = await this.performGraphQLRequest({
-      query: CREATOR_DONATIONS_QUERY,
-      variables: Object.keys(variables).length > 0 ? variables : undefined,
-      parser: (payload) => creatorDonationsDataSchema.parse(payload).creatorDonations,
+      query: REQUEST_STK_PUSH_MUTATION,
+      variables: { input },
+      parser: (payload) => requestStkPushDataSchema.parse(payload).requestStkPush,
+
       init: options.init
     });
 
     return result.data;
   }
 
-  async getPayoutBatches(
-    params: PayoutBatchesRequest = {},
-    options: GraphQLOperationOptions = {}
-  ): Promise<PayoutBatchConnection> {
-    const variables: Record<string, unknown> = {};
+  async getDonation(id: string, options: GraphQLOperationOptions = {}): Promise<Donation | null> {
+    const normalized = id.trim();
 
-    if (typeof params.first === "number" && Number.isFinite(params.first) && params.first > 0) {
-      variables.first = Math.floor(params.first);
-    }
-
-    if (params.after && params.after.length > 0) {
-      variables.after = params.after;
+    if (!normalized) {
+      throw new Error("A donation id is required.");
     }
 
     const result = await this.performGraphQLRequest({
-      query: PAYOUT_BATCHES_QUERY,
-      variables: Object.keys(variables).length > 0 ? variables : undefined,
-      parser: (payload) => payoutBatchesDataSchema.parse(payload).payoutBatches,
+      query: DONATION_QUERY,
+      variables: { id: normalized },
+      parser: (payload) => donationDataSchema.parse(payload).donation,
       init: options.init
     });
 
     return result.data;
   }
-
-  async getPayoutNotificationFeed(
-    params: PayoutNotificationsRequest = {},
+  async getDonationByCheckout(
+    checkoutRequestId: string,
     options: GraphQLOperationOptions = {}
-  ): Promise<PayoutNotificationConnection> {
-    const variables: Record<string, unknown> = {};
+  ): Promise<Donation | null> {
+    const normalized = checkoutRequestId.trim();
 
-    if (typeof params.first === "number" && Number.isFinite(params.first) && params.first > 0) {
-      variables.first = Math.floor(params.first);
-    }
-
-    if (params.after && params.after.length > 0) {
-      variables.after = params.after;
+    if (!normalized) {
+      throw new Error("A checkout request id is required.");
     }
 
     const result = await this.performGraphQLRequest({
-      query: PAYOUT_NOTIFICATION_FEED_QUERY,
-      variables: Object.keys(variables).length > 0 ? variables : undefined,
-      parser: (payload) => payoutNotificationsDataSchema.parse(payload).payoutNotificationFeed,
-      init: options.init
-    });
-
-    return result.data;
-  }
-
-  async markPayoutNotificationsRead(
-    ids: string[],
-    options: GraphQLOperationOptions = {}
-  ): Promise<number> {
-    if (!Array.isArray(ids) || ids.length === 0) {
-      return 0;
-    }
-
-    const result = await this.performGraphQLRequest({
-      query: MARK_PAYOUT_NOTIFICATIONS_READ_MUTATION,
-      variables: { ids },
-      parser: (payload) => markPayoutNotificationsReadDataSchema.parse(payload).markPayoutNotificationsRead,
+      query: DONATION_BY_CHECKOUT_QUERY,
+      variables: { checkoutRequestId: normalized },
+      parser: (payload) => donationByCheckoutDataSchema.parse(payload).donationByCheckout,
       init: options.init
     });
 

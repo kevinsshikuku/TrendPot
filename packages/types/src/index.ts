@@ -3,4 +3,4 @@ export * from "./leaderboard";
 export * from "./graphql-client";
 export * from "./auth";
 export * from "./tiktok";
-export * from "./payouts";
+export * from "./donations";

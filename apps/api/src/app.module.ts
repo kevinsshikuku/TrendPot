@@ -20,8 +20,7 @@ import { structuredErrorFormatter } from "./observability/error-formatter";
 import { PlatformAuthModule } from "./platform-auth/platform-auth.module";
 import { PlatformAuthService } from "./platform-auth/platform-auth.service";
 import { TikTokModule } from "./tiktok/tiktok.module";
-import { PayoutsModule } from "./payouts/payouts.module";
-
+import { DonationsModule } from "./donations/donations.module";
 @Module({
   imports: [
     GraphQLModule.forRootAsync<MercuriusDriverConfig>({
@@ -45,7 +44,7 @@ import { PayoutsModule } from "./payouts/payouts.module";
     ]),
     PlatformAuthModule,
     TikTokModule,
-    PayoutsModule
+    DonationsModule
   ],
   providers: [
     AppService,
