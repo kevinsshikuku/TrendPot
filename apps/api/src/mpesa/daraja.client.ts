@@ -149,10 +149,6 @@ export class DarajaClient {
 
     requestLogger.log("Dispatching Daraja STK push", metadata);
     requestLogger.info({ event: "daraja.stkpush.start", ...metadata });
-      requestId: request.requestId,
-      amount: request.amount,
-      shortCode: this.shortCode
-    });
 
     const timestamp = formatTimestamp(new Date());
     const password = Buffer.from(`${this.shortCode}${this.passkey}${timestamp}`).toString("base64");
