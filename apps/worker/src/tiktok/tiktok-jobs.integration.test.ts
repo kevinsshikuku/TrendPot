@@ -3,14 +3,47 @@ import { test } from "node:test";
 import { Types } from "mongoose";
 
 import { TIKTOK_VIDEO_UPDATE_CHANNEL } from "@trendpot/types";
-import { TikTokTokenCipher } from "@trendpot/utils";
+import { TikTokManagedKeyProvider, TikTokTokenCipher } from "@trendpot/utils";
 import type IORedis from "ioredis";
 
 import { createMetricsRefreshJobHandler } from "./tiktok-jobs";
 
 test("metrics refresh handler updates metrics and publishes redis notifications", async (t) => {
   const accountId = new Types.ObjectId();
-  const cipher = new TikTokTokenCipher();
+  const plaintextKey = Buffer.alloc(32, 7);
+  const ciphertext = Buffer.from("kms-ciphertext");
+  process.env.TIKTOK_TOKEN_ENC_KEY_ID = "kms-key-id";
+  process.env.TIKTOK_TOKEN_DATA_KEY_SECRET_ARN = "arn:aws:secretsmanager:region:acct:secret:tiktok-data-key";
+
+  const provider = new TikTokManagedKeyProvider({
+    secretsManager: {
+      async send(command) {
+        assert.equal(command.input.SecretId, process.env.TIKTOK_TOKEN_DATA_KEY_SECRET_ARN);
+        return { SecretBinary: ciphertext };
+      }
+    } as unknown as {
+      send: (command: { input: { SecretId: string } }) => Promise<{ SecretBinary: Buffer }>;
+    },
+    kms: {
+      async send(command) {
+        assert.deepEqual(command.input.CiphertextBlob, ciphertext);
+        return { Plaintext: plaintextKey };
+      }
+    } as unknown as {
+      send: (command: { input: { CiphertextBlob: Buffer } }) => Promise<{ Plaintext: Buffer }>;
+    }
+  });
+
+  const material = await provider.getKeyMaterial();
+  const cipher = new TikTokTokenCipher({ key: material.key, keyId: material.keyId });
+  assert.equal(material.key, plaintextKey.toString("base64"));
+  assert.equal(material.keyId, "kms-key-id");
+  assert.equal(cipher.decrypt(cipher.encrypt("roundtrip"), { keyId: cipher.keyId }), "roundtrip");
+
+  t.after(() => {
+    delete process.env.TIKTOK_TOKEN_ENC_KEY_ID;
+    delete process.env.TIKTOK_TOKEN_DATA_KEY_SECRET_ARN;
+  });
   const encryptedAccess = cipher.encrypt("access-token");
   const encryptedRefresh = cipher.encrypt("refresh-token");
 
@@ -104,6 +137,7 @@ test("metrics refresh handler updates metrics and publishes redis notifications"
 
   const handler = createMetricsRefreshJobHandler({
     redisPublisher: redisPublisher as unknown as IORedis,
+    tokenCipher: cipher,
     getMongoDb: async () => dbStub as never
   });
 
