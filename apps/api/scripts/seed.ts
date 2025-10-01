@@ -5,6 +5,7 @@ import { config as loadEnv } from "dotenv";
 import mongoose, { Schema, Types } from "mongoose";
 
 import { ChallengeEntity, ChallengeSchema, type ChallengeDocument } from "../src/models/challenge.schema";
+import { DonationEntity, DonationSchema, type DonationDocument } from "../src/donations/donation.schema";
 
 /**
  * The script seeds deterministic fixtures for local and staging environments so developers can
@@ -21,6 +22,10 @@ async function seedDatabase() {
   const ChallengeModel =
     mongoose.models[ChallengeEntity.name] ??
     mongoose.model<ChallengeDocument>(ChallengeEntity.name, ChallengeSchema);
+
+  const DonationModel =
+    mongoose.models[DonationEntity.name] ??
+    mongoose.model<DonationDocument>(DonationEntity.name, DonationSchema);
 
   // Lightweight schemas for users and submissions keep the fixtures structured without committing
   // to an entire domain model before the related features land in the API.
@@ -58,6 +63,8 @@ async function seedDatabase() {
   const connection = await mongoose.connect(uri, { dbName });
 
   try {
+    await DonationModel.createIndexes();
+
     const challenges = await seedChallenges(ChallengeModel);
     const users = await seedUsers(UserModel);
     await seedSubmissions({ SubmissionModel, challengeMap: challenges, userMap: users });
