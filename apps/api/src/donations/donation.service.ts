@@ -1,10 +1,17 @@
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import { InjectConnection, InjectModel } from "@nestjs/mongoose";
+import { createHash } from "node:crypto";
 import type { Connection, Model } from "mongoose";
-import { apiLogger } from "../observability/logger";
+import type { Logger as PinoLogger } from "pino";
 import { AuditLogService } from "../audit/audit-log.service";
-import { DonationEntity, DonationDocument } from "./donation.schema";
-import { DonationStatus } from "./donation-status.enum";
+import { DarajaClient } from "../mpesa/daraja.client";
+import { apiLogger } from "../observability/logger";
+import {
+  DonationEntity,
+  type DonationDocument,
+  DonationStatus,
+  type DonationStatusHistoryEntry
+} from "./donation.schema";
 import type { SignatureVerificationResult } from "../webhooks/mpesa-signature.service";
 
 export interface MpesaCallbackMetadata {
@@ -49,7 +56,82 @@ interface ParsedCallback {
   metadata: ParsedMetadataItem;
 }
 
-const SENSITIVE_FIELDS = ["payerPhone"];
+interface RequestStkPushParams {
+  submissionId: string;
+  donorUserId: string;
+  amountCents: number;
+  msisdn: string;
+  idempotencyKey: string;
+  accountReference?: string | null;
+  narrative?: string | null;
+  requestId: string;
+  logger: PinoLogger;
+}
+
+export interface DonationStatusChange {
+  status: DonationStatus;
+  occurredAt: Date;
+  description: string | null;
+}
+
+export interface DonationSnapshot {
+  id: string;
+  submissionId: string;
+  donorUserId: string;
+  amountCents: number;
+  currency: string;
+  status: DonationStatus;
+  statusHistory: DonationStatusChange[];
+  mpesaCheckoutRequestId: string | null;
+  mpesaMerchantRequestId: string | null;
+  failureReason: string | null;
+  lastResponseDescription: string | null;
+  accountReference: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  version: number;
+}
+
+type DonationRecord = DonationEntity & {
+  _id: { toString(): string };
+  createdAt: Date;
+  updatedAt: Date;
+  __v?: number;
+};
+
+const SENSITIVE_FIELDS = ["payerPhone"] as const;
+const DEFAULT_TRANSACTION_NARRATIVE = "TrendPot donation";
+
+const hashIdempotencyKey = (key: string) => {
+  return createHash("sha256").update(key).digest("hex");
+};
+
+const sanitizeMsisdn = (value: string) => value.replace(/\D/g, "");
+
+const sanitizeAccountReference = (value: string) => {
+  const trimmed = value.replace(/[^a-zA-Z0-9 ]/g, "").trim();
+  if (!trimmed) {
+    return "TrendPot";
+  }
+  return trimmed.slice(0, 20);
+};
+
+const sanitizeNarrative = (value: string | null | undefined) => {
+  if (!value) {
+    return DEFAULT_TRANSACTION_NARRATIVE;
+  }
+  const normalized = value.trim();
+  if (!normalized) {
+    return DEFAULT_TRANSACTION_NARRATIVE;
+  }
+  return normalized.slice(0, 64);
+};
+
+const toStatusChange = (entry: DonationStatusHistoryEntry): DonationStatusChange => ({
+  status: entry.status,
+  occurredAt: entry.occurredAt,
+  description: entry.description ?? null
+});
 
 @Injectable()
 export class DonationService {
@@ -59,7 +141,8 @@ export class DonationService {
     @InjectConnection() private readonly connection: Connection,
     @InjectModel(DonationEntity.name)
     private readonly donationModel: Model<DonationDocument>,
-    private readonly auditLogService: AuditLogService
+    private readonly auditLogService: AuditLogService,
+    private readonly darajaClient: DarajaClient
   ) {}
 
   async processStkPushCallback(
@@ -113,7 +196,7 @@ export class DonationService {
             [
               {
                 mpesaCheckoutRequestId: parsed.checkoutRequestId,
-                merchantRequestId: parsed.merchantRequestId,
+                mpesaMerchantRequestId: parsed.merchantRequestId,
                 accountReference: parsed.metadata.accountReference,
                 amountCents: parsed.metadata.amountCents ?? 0,
                 mpesaReceipt: parsed.metadata.receipt,
@@ -146,7 +229,8 @@ export class DonationService {
                     payerPhone: parsed.metadata.phoneNumber ?? existing.payerPhone,
                     transactionCompletedAt:
                       parsed.metadata.transactionDate ?? existing.transactionCompletedAt,
-                    merchantRequestId: parsed.merchantRequestId ?? existing.merchantRequestId,
+                    mpesaMerchantRequestId:
+                      parsed.merchantRequestId ?? existing.mpesaMerchantRequestId,
                     accountReference:
                       parsed.metadata.accountReference ?? existing.accountReference,
                     status: targetStatus,
@@ -211,225 +295,6 @@ export class DonationService {
 
     return result;
   }
-
-  private parseCallback(payload: MpesaStkPushCallbackPayload): ParsedCallback | null {
-    const body = payload?.Body;
-    const callback = body?.stkCallback;
-
-    if (!callback?.CheckoutRequestID) {
-      return null;
-    }
-
-    const metadata = this.parseMetadata(callback.CallbackMetadata?.Item ?? []);
-
-    return {
-      checkoutRequestId: callback.CheckoutRequestID,
-      merchantRequestId: callback.MerchantRequestID,
-      resultCode: callback.ResultCode,
-      resultDescription: callback.ResultDesc,
-      metadata
-    };
-  }
-
-  private parseMetadata(items: Array<{ Name: string; Value?: string | number | null }>): ParsedMetadataItem {
-    const metadata: ParsedMetadataItem = {};
-
-    for (const item of items ?? []) {
-      switch (item.Name) {
-        case "Amount": {
-          const amount = typeof item.Value === "number" ? item.Value : Number(item.Value);
-          if (!Number.isNaN(amount)) {
-            metadata.amountCents = Math.round(amount * 100);
-          }
-          break;
-        }
-        case "MpesaReceiptNumber":
-          if (typeof item.Value === "string") {
-            metadata.receipt = item.Value;
-          }
-          break;
-        case "PhoneNumber":
-          if (typeof item.Value === "string") {
-            metadata.phoneNumber = item.Value;
-          }
-          break;
-        case "TransactionDate":
-          if (typeof item.Value === "number" || typeof item.Value === "string") {
-            const asString = String(item.Value);
-            const parsed = this.parseMpesaTimestamp(asString);
-            if (parsed) {
-              metadata.transactionDate = parsed;
-            }
-          }
-          break;
-        case "AccountReference":
-          if (typeof item.Value === "string") {
-            metadata.accountReference = item.Value;
-          }
-          break;
-        default:
-          break;
-      }
-    }
-
-    return metadata;
-  }
-
-  private parseMpesaTimestamp(raw: string): Date | undefined {
-    if (!raw || raw.length !== 14) {
-      return undefined;
-    }
-
-    const year = Number(raw.slice(0, 4));
-    const month = Number(raw.slice(4, 6));
-    const day = Number(raw.slice(6, 8));
-    const hour = Number(raw.slice(8, 10));
-    const minute = Number(raw.slice(10, 12));
-    const second = Number(raw.slice(12, 14));
-
-    if ([year, month, day, hour, minute, second].some((value) => Number.isNaN(value))) {
-      return undefined;
-    }
-
-    const date = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
-
-    return Number.isNaN(date.getTime()) ? undefined : date;
-  }
-
-  private isDuplicate(existing: DonationDocument, parsed: ParsedCallback): boolean {
-    const amountMatches =
-      typeof parsed.metadata.amountCents === "number"
-        ? existing.amountCents === parsed.metadata.amountCents
-        : true;
-
-    const receiptMatches = parsed.metadata.receipt
-      ? existing.mpesaReceipt === parsed.metadata.receipt
-      : true;
-
-    const statusMatches =
-      existing.status === (parsed.resultCode === 0 ? DonationStatus.Paid : DonationStatus.Failed);
-
-    const resultCodeMatches = existing.resultCode === parsed.resultCode;
-
-    return amountMatches && receiptMatches && statusMatches && resultCodeMatches;
-  }
-
-  private maskValue(value: string): string {
-    if (!value) {
-      return value;
-    }
-
-    if (value.length <= 4) {
-      return "*".repeat(value.length);
-    }
-
-    return `${value.slice(0, 2)}***${value.slice(-2)}`;
-  }
-}
-
-export const redactSensitiveDonationFields = (payload: Record<string, unknown>) => {
-  const clone = { ...payload };
-
-  for (const field of SENSITIVE_FIELDS) {
-    if (typeof clone[field] === "string") {
-      clone[field] = "***redacted***";
-    }
-  }
-
-  return clone;
-};
-=======
-import { BadRequestException, Injectable } from "@nestjs/common";
-import { InjectModel } from "@nestjs/mongoose";
-import { createHash } from "node:crypto";
-import type { Model } from "mongoose";
-import type { Logger as PinoLogger } from "pino";
-import { DarajaClient } from "../mpesa/daraja.client";
-import { DonationEntity, type DonationDocument, DonationStatus, type DonationStatusHistoryEntry } from "./donation.schema";
-
-interface RequestStkPushParams {
-  submissionId: string;
-  donorUserId: string;
-  amountCents: number;
-  msisdn: string;
-  idempotencyKey: string;
-  accountReference?: string | null;
-  narrative?: string | null;
-  requestId: string;
-  logger: PinoLogger;
-}
-
-export interface DonationStatusChange {
-  status: DonationStatus;
-  occurredAt: Date;
-  description: string | null;
-}
-
-export interface DonationSnapshot {
-  id: string;
-  submissionId: string;
-  donorUserId: string;
-  amountCents: number;
-  currency: string;
-  status: DonationStatus;
-  statusHistory: DonationStatusChange[];
-  mpesaCheckoutRequestId: string | null;
-  mpesaMerchantRequestId: string | null;
-  failureReason: string | null;
-  lastResponseDescription: string | null;
-  accountReference: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-  version: number;
-}
-
-type DonationRecord = DonationEntity & {
-  _id: { toString(): string };
-  createdAt: Date;
-  updatedAt: Date;
-  __v?: number;
-};
-
-const DEFAULT_TRANSACTION_NARRATIVE = "TrendPot donation";
-
-const hashIdempotencyKey = (key: string) => {
-  return createHash("sha256").update(key).digest("hex");
-};
-
-const sanitizeMsisdn = (value: string) => value.replace(/\D/g, "");
-
-const sanitizeAccountReference = (value: string) => {
-  const trimmed = value.replace(/[^a-zA-Z0-9 ]/g, "").trim();
-  if (!trimmed) {
-    return "TrendPot";
-  }
-  return trimmed.slice(0, 20);
-};
-
-const sanitizeNarrative = (value: string | null | undefined) => {
-  if (!value) {
-    return DEFAULT_TRANSACTION_NARRATIVE;
-  }
-  const normalized = value.trim();
-  if (!normalized) {
-    return DEFAULT_TRANSACTION_NARRATIVE;
-  }
-  return normalized.slice(0, 64);
-};
-
-const toStatusChange = (entry: DonationStatusHistoryEntry): DonationStatusChange => ({
-  status: entry.status,
-  occurredAt: entry.occurredAt,
-  description: entry.description ?? null
-});
-
-@Injectable()
-export class DonationService {
-  constructor(
-    @InjectModel(DonationEntity.name)
-    private readonly donationModel: Model<DonationDocument>,
-    private readonly darajaClient: DarajaClient
-  ) {}
 
   async requestStkPush(params: RequestStkPushParams): Promise<DonationSnapshot> {
     const amount = Number(params.amountCents);
@@ -576,6 +441,120 @@ export class DonationService {
     return this.toSnapshot(record as DonationRecord);
   }
 
+  private parseCallback(payload: MpesaStkPushCallbackPayload): ParsedCallback | null {
+    const body = payload?.Body;
+    const callback = body?.stkCallback;
+
+    if (!callback?.CheckoutRequestID) {
+      return null;
+    }
+
+    const metadata = this.parseMetadata(callback.CallbackMetadata?.Item ?? []);
+
+    return {
+      checkoutRequestId: callback.CheckoutRequestID,
+      merchantRequestId: callback.MerchantRequestID,
+      resultCode: callback.ResultCode,
+      resultDescription: callback.ResultDesc,
+      metadata
+    };
+  }
+
+  private parseMetadata(items: Array<{ Name: string; Value?: string | number | null }>): ParsedMetadataItem {
+    const metadata: ParsedMetadataItem = {};
+
+    for (const item of items ?? []) {
+      switch (item.Name) {
+        case "Amount": {
+          const amount = typeof item.Value === "number" ? item.Value : Number(item.Value);
+          if (!Number.isNaN(amount)) {
+            metadata.amountCents = Math.round(amount * 100);
+          }
+          break;
+        }
+        case "MpesaReceiptNumber":
+          if (typeof item.Value === "string") {
+            metadata.receipt = item.Value;
+          }
+          break;
+        case "PhoneNumber":
+          if (typeof item.Value === "string") {
+            metadata.phoneNumber = item.Value;
+          }
+          break;
+        case "TransactionDate":
+          if (typeof item.Value === "number" || typeof item.Value === "string") {
+            const asString = String(item.Value);
+            const parsed = this.parseMpesaTimestamp(asString);
+            if (parsed) {
+              metadata.transactionDate = parsed;
+            }
+          }
+          break;
+        case "AccountReference":
+          if (typeof item.Value === "string") {
+            metadata.accountReference = item.Value;
+          }
+          break;
+        default:
+          break;
+      }
+    }
+
+    return metadata;
+  }
+
+  private parseMpesaTimestamp(raw: string): Date | undefined {
+    if (!raw || raw.length !== 14) {
+      return undefined;
+    }
+
+    const year = Number(raw.slice(0, 4));
+    const month = Number(raw.slice(4, 6));
+    const day = Number(raw.slice(6, 8));
+    const hour = Number(raw.slice(8, 10));
+    const minute = Number(raw.slice(10, 12));
+    const second = Number(raw.slice(12, 14));
+
+    if ([year, month, day, hour, minute, second].some((value) => Number.isNaN(value))) {
+      return undefined;
+    }
+
+    const date = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+
+    return Number.isNaN(date.getTime()) ? undefined : date;
+  }
+
+  private isDuplicate(existing: DonationDocument, parsed: ParsedCallback): boolean {
+    const amountMatches =
+      typeof parsed.metadata.amountCents === "number"
+        ? existing.amountCents === parsed.metadata.amountCents
+        : true;
+
+    const receiptMatches = parsed.metadata.receipt
+      ? existing.mpesaReceipt === parsed.metadata.receipt
+      : true;
+
+    const statusMatches =
+      existing.status === (parsed.resultCode === 0 ? DonationStatus.Paid : DonationStatus.Failed);
+
+    const resultCodeMatches = existing.resultCode === parsed.resultCode;
+
+    return amountMatches && receiptMatches && statusMatches && resultCodeMatches;
+  }
+
+  private maskValue(value: string): string {
+    if (!value) {
+      return value;
+    }
+
+    if (value.length <= 4) {
+      return "*".repeat(value.length);
+    }
+
+    return `${value.slice(0, 2)}***${value.slice(-2)}`;
+  }
+
   private toSnapshot(document: DonationRecord): DonationSnapshot {
     const history = Array.isArray(document.statusHistory)
       ? document.statusHistory.map((entry) => toStatusChange(entry as DonationStatusHistoryEntry))
@@ -600,3 +579,15 @@ export class DonationService {
     };
   }
 }
+
+export const redactSensitiveDonationFields = (payload: Record<string, unknown>) => {
+  const clone = { ...payload } as Record<string, unknown>;
+
+  for (const field of SENSITIVE_FIELDS) {
+    if (typeof clone[field] === "string") {
+      clone[field] = "***redacted***";
+    }
+  }
+
+  return clone;
+};

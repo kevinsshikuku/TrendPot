@@ -4,6 +4,12 @@ import { DonationStatus } from "./donation-status.enum";
 
 export type DonationDocument = HydratedDocument<DonationEntity>;
 
+export interface DonationStatusHistoryEntry {
+  status: DonationStatus;
+  occurredAt: Date;
+  description?: string | null;
+}
+
 @Schema({
   collection: "donations",
   timestamps: true,
@@ -20,14 +26,32 @@ export class DonationEntity {
   @Prop({ required: true, min: 0 })
   declare amountCents: number;
 
+  @Prop({ required: true, default: "KES" })
+  declare currency: string;
+
   @Prop({ required: true, enum: DonationStatus, default: DonationStatus.Pending })
   declare status: DonationStatus;
 
-  @Prop({ required: true, unique: true, index: true })
-  declare mpesaCheckoutRequestId: string;
+  @Prop({
+    type: [
+      {
+        status: { type: String, enum: DonationStatus, required: true },
+        occurredAt: { type: Date, required: true },
+        description: { type: String, required: false }
+      }
+    ],
+    default: []
+  })
+  declare statusHistory: DonationStatusHistoryEntry[];
+
+  @Prop({ required: false, unique: true, sparse: true })
+  declare idempotencyKeyHash?: string;
+
+  @Prop({ required: false, unique: true, sparse: true })
+  declare mpesaCheckoutRequestId?: string;
 
   @Prop({ required: false })
-  declare merchantRequestId?: string;
+  declare mpesaMerchantRequestId?: string;
 
   @Prop({ required: false })
   declare accountReference?: string;
@@ -53,8 +77,15 @@ export class DonationEntity {
   @Prop({ required: false, type: Date })
   declare lastCallbackAt?: Date;
 
+  @Prop({ required: false })
+  declare lastResponseDescription?: string;
+
+  @Prop({ required: false })
+  declare failureReason?: string;
 }
 
 export const DonationSchema = SchemaFactory.createForClass(DonationEntity);
-DonationSchema.index({ mpesaCheckoutRequestId: 1 }, { unique: true });
+DonationSchema.index({ mpesaCheckoutRequestId: 1 }, { unique: true, sparse: true });
+DonationSchema.index({ idempotencyKeyHash: 1 }, { unique: true, sparse: true });
 
+export { DonationStatus };
