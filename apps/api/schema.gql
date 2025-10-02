@@ -220,6 +220,46 @@ type Donation {
   version: Int!
 }
 
+type ConnectionPageInfo {
+  endCursor: String
+  hasNextPage: Boolean!
+}
+
+type AdminDonationTotals {
+  count: Int!
+  grossAmountCents: Int!
+  platformFeeCents: Int!
+  platformShareCents: Int!
+  platformVatCents: Int!
+  creatorShareCents: Int!
+}
+
+type AdminDonationEdge {
+  cursor: String!
+  node: Donation!
+}
+
+type AdminDonationConnection {
+  edges: [AdminDonationEdge!]!
+  pageInfo: ConnectionPageInfo!
+  totals: AdminDonationTotals!
+}
+
+type AdminDonationTimeBucket {
+  start: DateTime!
+  end: DateTime!
+  amountCents: Int!
+}
+
+type AdminDonationMetrics {
+  dailyTotals: [AdminDonationTimeBucket!]!
+  weeklyTotals: [AdminDonationTimeBucket!]!
+  monthlyTotals: [AdminDonationTimeBucket!]!
+  vatCollectedCents: Int!
+  pendingPayoutCents: Int!
+  outstandingClearingBalanceCents: Int!
+}
+
 type Health {
   status: String!
   service: String!
@@ -341,6 +381,15 @@ input RequestDonationInput {
   narrative: String
 }
 
+input AdminDonationFilterInput {
+  statuses: [DonationStatus!]
+  payoutStates: [DonationPayoutState!]
+  creatorUserId: String
+  challengeId: String
+  donatedAfter: DateTime
+  donatedBefore: DateTime
+}
+
 type Query {
   featuredChallenges(status: String, limit: Int): [ChallengeSummary!]!
   challenges(status: String, limit: Int): [ChallengeSummary!]!
@@ -352,6 +401,8 @@ type Query {
   viewerSessions: [ViewerSession!]!
   donation(id: String!): Donation
   donationByCheckout(checkoutRequestId: String!): Donation
+  adminDonations(first: Int, after: String, filter: AdminDonationFilterInput): AdminDonationConnection!
+  adminDonationMetrics(filter: AdminDonationFilterInput): AdminDonationMetrics!
 }
 
 type Mutation {

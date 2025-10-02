@@ -11,12 +11,17 @@ import type { TikTokLoginIntent, Viewer, ViewerSession, User } from "./auth";
 import {
   donationHistoryListSchema,
   donationSchema,
-  donationSubmissionContextSchema
+  donationSubmissionContextSchema,
+  adminDonationConnectionSchema,
+  adminDonationMetricsSchema
 } from "./donations";
 import type {
   Donation,
   DonationHistoryEntry,
-  DonationSubmissionContext
+  DonationSubmissionContext,
+  AdminDonationConnection,
+  AdminDonationMetrics,
+  AdminDonationFilterInput
 } from "./donations";
 import {
   creatorDonationConnectionSchema,
@@ -45,6 +50,12 @@ export interface ChallengeListRequest {
   first?: number;
   after?: string;
   filter?: ChallengeListFilters;
+}
+
+export interface ListAdminDonationsParams {
+  first?: number;
+  after?: string;
+  filter?: AdminDonationFilterInput;
 }
 
 export interface CreateChallengeInput {
@@ -348,6 +359,94 @@ const DONATION_BY_CHECKOUT_QUERY = /* GraphQL */ `
 const requestStkPushDataSchema = z.object({
   requestStkPush: donationSchema
 });
+
+const adminDonationsDataSchema = z.object({
+  adminDonations: adminDonationConnectionSchema
+});
+
+const ADMIN_DONATIONS_QUERY = /* GraphQL */ `
+  query AdminDonations($first: Int, $after: String, $filter: AdminDonationFilterInput) {
+    adminDonations(first: $first, after: $after, filter: $filter) {
+      edges {
+        cursor
+        node {
+          id
+          submissionId
+          challengeId
+          creatorUserId
+          donorUserId
+          amountCents
+          platformFeeCents
+          creatorShareCents
+          platformShareCents
+          platformVatCents
+          currency
+          status
+          payoutState
+          payoutBatchId
+          payoutItemId
+          availableAt
+          paidAt
+          statusHistory {
+            status
+            occurredAt
+            description
+          }
+          mpesaCheckoutRequestId
+          mpesaMerchantRequestId
+          failureReason
+          lastResponseDescription
+          accountReference
+          ledgerJournalEntryId
+          createdAt
+          updatedAt
+          version
+        }
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+      totals {
+        count
+        grossAmountCents
+        platformFeeCents
+        platformShareCents
+        platformVatCents
+        creatorShareCents
+      }
+    }
+  }
+`;
+
+const adminDonationMetricsDataSchema = z.object({
+  adminDonationMetrics: adminDonationMetricsSchema
+});
+
+const ADMIN_DONATION_METRICS_QUERY = /* GraphQL */ `
+  query AdminDonationMetrics($filter: AdminDonationFilterInput) {
+    adminDonationMetrics(filter: $filter) {
+      dailyTotals {
+        start
+        end
+        amountCents
+      }
+      weeklyTotals {
+        start
+        end
+        amountCents
+      }
+      monthlyTotals {
+        start
+        end
+        amountCents
+      }
+      vatCollectedCents
+      pendingPayoutCents
+      outstandingClearingBalanceCents
+    }
+  }
+`;
 
 const REQUEST_STK_PUSH_MUTATION = /* GraphQL */ `
   mutation RequestStkPush($input: RequestDonationInput!) {
@@ -1133,6 +1232,56 @@ export class TrendPotGraphQLClient {
     return result.data;
   }
 
+  async listAdminDonations(
+    params: ListAdminDonationsParams = {},
+    options: GraphQLOperationOptions = {}
+  ): Promise<AdminDonationConnection> {
+    const variables: Record<string, unknown> = {};
+
+    if (typeof params.first === "number") {
+      variables.first = params.first;
+    }
+
+    if (typeof params.after === "string" && params.after.trim().length > 0) {
+      variables.after = params.after.trim();
+    }
+
+    const filter = this.normalizeAdminDonationFilter(params.filter);
+    if (filter) {
+      variables.filter = filter;
+    }
+
+    const result = await this.performGraphQLRequest({
+      query: ADMIN_DONATIONS_QUERY,
+      variables,
+      parser: (payload) => adminDonationsDataSchema.parse(payload).adminDonations,
+      init: options.init
+    });
+
+    return result.data;
+  }
+
+  async getAdminDonationMetrics(
+    filter?: AdminDonationFilterInput,
+    options: GraphQLOperationOptions = {}
+  ): Promise<AdminDonationMetrics> {
+    const variables: Record<string, unknown> = {};
+    const normalizedFilter = this.normalizeAdminDonationFilter(filter);
+
+    if (normalizedFilter) {
+      variables.filter = normalizedFilter;
+    }
+
+    const result = await this.performGraphQLRequest({
+      query: ADMIN_DONATION_METRICS_QUERY,
+      variables,
+      parser: (payload) => adminDonationMetricsDataSchema.parse(payload).adminDonationMetrics,
+      init: options.init
+    });
+
+    return result.data;
+  }
+
   async getViewer(options: GraphQLOperationOptions = {}): Promise<Viewer> {
     const result = await this.performGraphQLRequest({
       query: VIEWER_QUERY,
@@ -1353,6 +1502,53 @@ export class TrendPotGraphQLClient {
     }
 
     return Object.keys(input).length > 0 ? input : undefined;
+  }
+
+  private normalizeAdminDonationFilter(filter?: AdminDonationFilterInput) {
+    if (!filter) {
+      return undefined;
+    }
+
+    const normalized: Record<string, unknown> = {};
+
+    if (Array.isArray(filter.statuses) && filter.statuses.length > 0) {
+      normalized.statuses = filter.statuses;
+    }
+
+    if (Array.isArray(filter.payoutStates) && filter.payoutStates.length > 0) {
+      normalized.payoutStates = filter.payoutStates;
+    }
+
+    if (typeof filter.creatorUserId === "string" && filter.creatorUserId.trim().length > 0) {
+      normalized.creatorUserId = filter.creatorUserId.trim();
+    }
+
+    if (typeof filter.challengeId === "string" && filter.challengeId.trim().length > 0) {
+      normalized.challengeId = filter.challengeId.trim();
+    }
+
+    if (filter.donatedAfter) {
+      normalized.donatedAfter = this.normalizeDateInput(filter.donatedAfter);
+    }
+
+    if (filter.donatedBefore) {
+      normalized.donatedBefore = this.normalizeDateInput(filter.donatedBefore);
+    }
+
+    return Object.keys(normalized).length > 0 ? normalized : undefined;
+  }
+
+  private normalizeDateInput(value: string | Date): string {
+    if (value instanceof Date) {
+      return value.toISOString();
+    }
+
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString();
+    }
+
+    return value;
   }
 
   private async performGraphQLRequest<TResult>({

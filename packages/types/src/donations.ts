@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { donationPayoutStateSchema } from "./payouts";
+import { connectionPageInfoSchema, donationPayoutStateSchema } from "./payouts";
+import type { DonationPayoutState } from "./payouts";
 export const donationStatusSchema = z.enum([
   "pending",
   "processing",
@@ -78,10 +79,58 @@ export const donationSubmissionContextSchema = z.object({
   challenge: donationChallengeContextSchema
 });
 
+export const adminDonationTotalsSchema = z.object({
+  count: z.number().int().nonnegative(),
+  grossAmountCents: z.number().int().nonnegative(),
+  platformFeeCents: z.number().int().nonnegative(),
+  platformShareCents: z.number().int().nonnegative(),
+  platformVatCents: z.number().int().nonnegative(),
+  creatorShareCents: z.number().int().nonnegative()
+});
+
+export const adminDonationEdgeSchema = z.object({
+  cursor: z.string(),
+  node: donationSchema
+});
+
+export const adminDonationConnectionSchema = z.object({
+  edges: z.array(adminDonationEdgeSchema),
+  pageInfo: connectionPageInfoSchema,
+  totals: adminDonationTotalsSchema
+});
+
+export const adminDonationTimeBucketSchema = z.object({
+  start: z.string(),
+  end: z.string(),
+  amountCents: z.number().int().nonnegative()
+});
+
+export const adminDonationMetricsSchema = z.object({
+  dailyTotals: z.array(adminDonationTimeBucketSchema),
+  weeklyTotals: z.array(adminDonationTimeBucketSchema),
+  monthlyTotals: z.array(adminDonationTimeBucketSchema),
+  vatCollectedCents: z.number().int().nonnegative(),
+  pendingPayoutCents: z.number().int().nonnegative(),
+  outstandingClearingBalanceCents: z.number().int()
+});
+
 export type DonationStatus = z.infer<typeof donationStatusSchema>;
 export type Donation = z.infer<typeof donationSchema>;
 export type DonationHistoryEntry = z.infer<typeof donationHistoryEntrySchema>;
 export type DonationHistoryList = z.infer<typeof donationHistoryListSchema>;
 export type DonationChallengeContext = z.infer<typeof donationChallengeContextSchema>;
 export type DonationSubmissionContext = z.infer<typeof donationSubmissionContextSchema>;
+export type AdminDonationTotals = z.infer<typeof adminDonationTotalsSchema>;
+export type AdminDonationConnection = z.infer<typeof adminDonationConnectionSchema>;
+export type AdminDonationTimeBucket = z.infer<typeof adminDonationTimeBucketSchema>;
+export type AdminDonationMetrics = z.infer<typeof adminDonationMetricsSchema>;
+
+export interface AdminDonationFilterInput {
+  statuses?: DonationStatus[];
+  payoutStates?: DonationPayoutState[];
+  creatorUserId?: string;
+  challengeId?: string;
+  donatedAfter?: string | Date;
+  donatedBefore?: string | Date;
+}
 

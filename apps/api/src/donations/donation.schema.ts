@@ -144,6 +144,7 @@ DonationSchema.virtual("id").get(function (this: DonationEntity & { _id: unknown
 DonationSchema.index({ creatorUserId: 1, donatedAt: -1, _id: -1 });
 DonationSchema.index({ creatorUserId: 1, status: 1, donatedAt: -1 });
 DonationSchema.index({ creatorUserId: 1, payoutState: 1, donatedAt: -1 });
+DonationSchema.index({ donatedAt: -1, _id: -1 });
 DonationSchema.index({ mpesaCheckoutRequestId: 1 }, { unique: true, sparse: true });
 DonationSchema.index({ idempotencyKeyHash: 1 }, { unique: true, sparse: true });
 DonationSchema.index({ ledgerJournalEntryId: 1 }, { unique: true, sparse: true });
