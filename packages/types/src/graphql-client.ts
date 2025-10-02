@@ -291,6 +291,7 @@ const DONATION_QUERY = /* GraphQL */ `
       failureReason
       lastResponseDescription
       accountReference
+      ledgerJournalEntryId
       createdAt
       updatedAt
       version
@@ -328,6 +329,7 @@ const DONATION_BY_CHECKOUT_QUERY = /* GraphQL */ `
       failureReason
       lastResponseDescription
       accountReference
+      ledgerJournalEntryId
       createdAt
       updatedAt
       version
@@ -365,6 +367,7 @@ const REQUEST_STK_PUSH_MUTATION = /* GraphQL */ `
       failureReason
       lastResponseDescription
       accountReference
+      ledgerJournalEntryId
       createdAt
       updatedAt
       version
@@ -844,6 +847,7 @@ const REQUEST_STK_PUSH_MUTATION = /* GraphQL */ `
       failureReason
       lastResponseDescription
       accountReference
+      ledgerJournalEntryId
       createdAt
       updatedAt
       version
@@ -881,6 +885,7 @@ const DONATION_QUERY = /* GraphQL */ `
       failureReason
       lastResponseDescription
       accountReference
+      ledgerJournalEntryId
       createdAt
       updatedAt
       version

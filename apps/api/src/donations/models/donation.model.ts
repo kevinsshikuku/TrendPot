@@ -66,6 +66,9 @@ export class DonationModel {
   @Field({ nullable: true })
   declare accountReference?: string | null;
 
+  @Field({ nullable: true })
+  declare ledgerJournalEntryId?: string | null;
+
   @Field(() => GraphQLISODateTime)
   declare createdAt: Date;
 

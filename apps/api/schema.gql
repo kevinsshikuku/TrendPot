@@ -210,6 +210,7 @@ type Donation {
   failureReason: String
   lastResponseDescription: String
   accountReference: String
+  ledgerJournalEntryId: String
   createdAt: DateTime!
   updatedAt: DateTime!
   version: Int!

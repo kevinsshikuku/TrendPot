@@ -39,6 +39,7 @@ export const donationSchema = z.object({
   accountReference: z.string().nullable().optional(),
   failureReason: z.string().nullable().optional(),
   lastResponseDescription: z.string().nullable().optional(),
+  ledgerJournalEntryId: z.string().nullable().optional(),
   idempotencyKey: z.string().nullable().optional(),
   donorDisplayName: z.string().nullable().optional(),
   createdAt: z.string(),

@@ -53,6 +53,7 @@ export interface DonationSnapshot {
   failureReason: string | null;
   lastResponseDescription: string | null;
   accountReference: string | null;
+  ledgerJournalEntryId: string | null;
   createdAt: Date;
   updatedAt: Date;
   version: number;
@@ -63,6 +64,7 @@ type DonationRecord = DonationEntity & {
   createdAt: Date;
   updatedAt: Date;
   __v?: number;
+  ledgerJournalEntryId?: Types.ObjectId | null;
 };
 
 const DEFAULT_TRANSACTION_NARRATIVE = "TrendPot donation";
@@ -314,6 +316,7 @@ export class DonationRequestsService {
       failureReason: document.failureReason ?? null,
       lastResponseDescription: document.lastResponseDescription ?? null,
       accountReference: document.accountReference ?? null,
+      ledgerJournalEntryId: document.ledgerJournalEntryId?.toString?.() ?? null,
       createdAt: document.createdAt,
       updatedAt: document.updatedAt,
       version: document.__v ?? 0

@@ -1,11 +1,13 @@
 import { Injectable } from "@nestjs/common";
 import { InjectConnection, InjectModel } from "@nestjs/mongoose";
-import type { Connection, Model } from "mongoose";
+import type { Connection, Model, Types } from "mongoose";
 import { AuditLogService } from "../../audit/audit-log.service";
 import { apiLogger } from "../../observability/logger";
 import { DonationEntity, type DonationDocument } from "../donation.schema";
 import { DonationStatus } from "../donation-status.enum";
 import type { SignatureVerificationResult } from "../../webhooks/mpesa-signature.service";
+import { LedgerService } from "../../ledger/ledger.service";
+import { LedgerConfigService } from "../../ledger/ledger.config";
 
 export interface MpesaCallbackMetadata {
   rawEventId: string;
@@ -49,6 +51,13 @@ interface ParsedCallback {
   metadata: ParsedMetadataItem;
 }
 
+interface DonationDistribution {
+  creatorShareCents: number;
+  platformShareCents: number;
+  platformVatCents: number;
+  commissionGrossCents: number;
+}
+
 const SENSITIVE_FIELDS = ["payerPhone"];
 
 @Injectable()
@@ -59,7 +68,9 @@ export class DonationCallbackService {
     @InjectConnection() private readonly connection: Connection,
     @InjectModel(DonationEntity.name)
     private readonly donationModel: Model<DonationDocument>,
-    private readonly auditLogService: AuditLogService
+    private readonly auditLogService: AuditLogService,
+    private readonly ledgerService: LedgerService,
+    private readonly ledgerConfig: LedgerConfigService
   ) {}
 
   async processStkPushCallback(
@@ -145,29 +156,73 @@ export class DonationCallbackService {
         if (duplicate) {
           result = { donation: existing, idempotentReplay: true };
         } else {
+          let distribution: DonationDistribution | null = null;
+          let ledgerJournalEntryId = existing.ledgerJournalEntryId;
+
+          const amountCents = parsed.metadata.amountCents ?? existing.amountCents;
+
+          if (targetStatus === DonationStatus.Succeeded && !ledgerJournalEntryId) {
+            if (
+              typeof amountCents !== "number" ||
+              !Number.isInteger(amountCents) ||
+              amountCents <= 0
+            ) {
+              throw new Error("A positive integer amount is required to post donation financials.");
+            }
+
+            distribution = this.computeDistribution(amountCents);
+
+            const ledgerResult = await this.ledgerService.recordDonationSuccess({
+              session,
+              donationId: existing._id.toString(),
+              amountCents,
+              creatorShareCents: distribution.creatorShareCents,
+              commissionNetCents: distribution.platformShareCents,
+              vatCents: distribution.platformVatCents,
+              creatorUserId: existing.creatorUserId as Types.ObjectId,
+              currency: existing.currency,
+              donatedAt: existing.donatedAt ?? now
+            });
+
+            ledgerJournalEntryId = ledgerResult.journalEntryId;
+          }
+
           const statusHistoryEntry = {
             status: targetStatus,
             occurredAt: now,
             description: parsed.resultDescription
           };
 
+          const updateSet: Record<string, unknown> = {
+            amountCents: parsed.metadata.amountCents ?? existing.amountCents,
+            mpesaReceipt: parsed.metadata.receipt ?? existing.mpesaReceipt,
+            payerPhone: parsed.metadata.phoneNumber ?? existing.payerPhone,
+            transactionCompletedAt: parsed.metadata.transactionDate ?? existing.transactionCompletedAt,
+            mpesaMerchantRequestId: parsed.merchantRequestId ?? existing.mpesaMerchantRequestId,
+            accountReference: parsed.metadata.accountReference ?? existing.accountReference,
+            status: targetStatus,
+            resultCode: parsed.resultCode,
+            resultDescription: parsed.resultDescription,
+            rawCallback: payload as Record<string, unknown>,
+            lastCallbackAt: now
+          };
+
+          if (distribution) {
+            updateSet.creatorShareCents = distribution.creatorShareCents;
+            updateSet.platformShareCents = distribution.platformShareCents;
+            updateSet.platformVatCents = distribution.platformVatCents;
+            updateSet.platformFeeCents = existing.platformFeeCents ?? 0;
+          }
+
+          if (ledgerJournalEntryId) {
+            updateSet.ledgerJournalEntryId = ledgerJournalEntryId;
+          }
+
           const updated = await this.donationModel
             .findOneAndUpdate(
               { _id: existing._id },
               {
-                $set: {
-                  amountCents: parsed.metadata.amountCents ?? existing.amountCents,
-                  mpesaReceipt: parsed.metadata.receipt ?? existing.mpesaReceipt,
-                  payerPhone: parsed.metadata.phoneNumber ?? existing.payerPhone,
-                  transactionCompletedAt: parsed.metadata.transactionDate ?? existing.transactionCompletedAt,
-                  merchantRequestId: parsed.merchantRequestId ?? existing.merchantRequestId,
-                  accountReference: parsed.metadata.accountReference ?? existing.accountReference,
-                  status: targetStatus,
-                  resultCode: parsed.resultCode,
-                  resultDescription: parsed.resultDescription,
-                  rawCallback: payload as Record<string, unknown>,
-                  lastCallbackAt: now
-                },
+                $set: updateSet,
                 $push: { statusHistory: statusHistoryEntry }
               },
               { new: true, session }
@@ -187,17 +242,25 @@ export class DonationCallbackService {
             outcome: result.idempotentReplay ? "duplicate" : "processed",
             resourceType: "donation",
             resourceId: donationId,
-            metadata: {
-              checkoutRequestId: parsed.checkoutRequestId,
-              merchantRequestId: parsed.merchantRequestId,
-              accountReference: parsed.metadata.accountReference,
-              resultCode: parsed.resultCode,
-              idempotentReplay: result.idempotentReplay,
-              verification,
-              rawEventId: metadata.rawEventId,
-              requestId: metadata.requestId,
-              sourceIp: metadata.sourceIp
-            }
+          metadata: {
+            checkoutRequestId: parsed.checkoutRequestId,
+            merchantRequestId: parsed.merchantRequestId,
+            accountReference: parsed.metadata.accountReference,
+            resultCode: parsed.resultCode,
+            idempotentReplay: result.idempotentReplay,
+            distribution: result.donation
+              ? {
+                  creatorShareCents: result.donation.creatorShareCents,
+                  platformShareCents: result.donation.platformShareCents,
+                  platformVatCents: result.donation.platformVatCents,
+                  ledgerJournalEntryId: result.donation.ledgerJournalEntryId?.toString?.()
+                }
+              : undefined,
+            verification,
+            rawEventId: metadata.rawEventId,
+            requestId: metadata.requestId,
+            sourceIp: metadata.sourceIp
+          }
           },
           session
         );
@@ -333,6 +396,27 @@ export class DonationCallbackService {
     }
 
     return `${value.slice(0, 2)}***${value.slice(-2)}`;
+  }
+
+  private computeDistribution(amountCents: number): DonationDistribution {
+    const commissionRate = this.ledgerConfig.getPlatformCommissionRate();
+    const vatRate = this.ledgerConfig.getVatRate();
+
+    const commissionGross = Math.floor(amountCents * commissionRate);
+    const vat = Math.round((commissionGross * vatRate) / (1 + vatRate));
+    const commissionNet = commissionGross - vat;
+    const creatorShare = amountCents - commissionGross;
+
+    if (creatorShare + commissionNet + vat !== amountCents) {
+      throw new Error("Distribution components do not balance to the gross amount.");
+    }
+
+    return {
+      creatorShareCents: creatorShare,
+      platformShareCents: commissionNet,
+      platformVatCents: vat,
+      commissionGrossCents: commissionGross
+    };
   }
 }
 
