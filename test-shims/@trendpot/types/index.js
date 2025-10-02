@@ -293,6 +293,32 @@ class TrendPotGraphQLClient {
   async getChallenge(id) {
     return this.store.get(id) ?? null;
   }
+
+  async listAdminDonations() {
+    return {
+      edges: [],
+      pageInfo: { hasNextPage: false, endCursor: null },
+      totals: {
+        count: 0,
+        grossAmountCents: 0,
+        creatorShareCents: 0,
+        platformShareCents: 0,
+        platformFeeCents: 0,
+        platformVatCents: 0
+      }
+    };
+  }
+
+  async getAdminDonationMetrics() {
+    return {
+      vatCollectedCents: 0,
+      pendingPayoutCents: 0,
+      outstandingClearingBalanceCents: 0,
+      dailyTotals: [],
+      weeklyTotals: [],
+      monthlyTotals: []
+    };
+  }
 }
 
 module.exports = {

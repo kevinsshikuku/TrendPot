@@ -33,7 +33,7 @@ interface DonationRecord {
 
 class DonationModelStub {
   private sequence = 1;
-  readonly documents = new Map<string, DonationRecord>();
+  documents = new Map<string, DonationRecord>();
 
   findOne(filter: Record<string, unknown>) {
     const match = this.lookupByFilter(filter);
@@ -136,6 +136,18 @@ class DonationModelStub {
     return query;
   }
 
+  snapshot() {
+    return new Map(
+      Array.from(this.documents.entries(), ([key, value]) => [key, structuredClone(value)])
+    );
+  }
+
+  restore(snapshot: Map<string, DonationRecord>) {
+    this.documents = new Map(
+      Array.from(snapshot.entries(), ([key, value]) => [key, structuredClone(value)])
+    );
+  }
+
   private lookupByFilter(filter: Record<string, unknown>) {
     if (filter.mpesaCheckoutRequestId) {
       return this.documents.get(String(filter.mpesaCheckoutRequestId));
@@ -150,25 +162,61 @@ class DonationModelStub {
   }
 }
 
+type RollbackHandler = () => void;
+
 class SessionStub {
+  private rollbackHandlers: RollbackHandler[] = [];
+
+  constructor(private readonly model: DonationModelStub) {}
+
   async withTransaction(callback: () => Promise<void>) {
-    await callback();
+    const snapshot = this.model.snapshot();
+
+    try {
+      await callback();
+      this.rollbackHandlers = [];
+    } catch (error) {
+      this.model.restore(snapshot);
+      while (this.rollbackHandlers.length > 0) {
+        const handler = this.rollbackHandlers.pop();
+        try {
+          handler?.();
+        } catch {
+          // ignore rollback handler failures in tests
+        }
+      }
+      throw error;
+    }
   }
 
   async endSession() {}
+
+  registerRollback(handler: RollbackHandler) {
+    this.rollbackHandlers.push(handler);
+  }
 }
 
 class ConnectionStub {
+  constructor(private readonly model: DonationModelStub) {}
+
   async startSession() {
-    return new SessionStub();
+    return new SessionStub(this.model);
   }
 }
 
 class AuditLogServiceStub {
   readonly entries: Array<Record<string, unknown>> = [];
 
-  async record(entry: Record<string, unknown>) {
+  async record(entry: Record<string, unknown>, session?: SessionStub) {
     this.entries.push(entry);
+
+    if (session) {
+      const entries = this.entries;
+      const index = entries.length - 1;
+      session.registerRollback(() => {
+        entries.splice(index, 1);
+      });
+    }
   }
 }
 
@@ -194,8 +242,6 @@ const createPayload = (overrides: Partial<MpesaStkPushCallbackPayload> = {}): Mp
 
 const verification: SignatureVerificationResult = { valid: true };
 
-const connection = new ConnectionStub();
-
 class LedgerServiceStub {
   readonly calls: Array<Record<string, unknown>> = [];
 
@@ -205,6 +251,17 @@ class LedgerServiceStub {
       journalEntryId: "journal-1" as unknown as Types.ObjectId,
       created: true
     };
+  }
+}
+
+class FailingLedgerServiceStub extends LedgerServiceStub {
+  constructor(private readonly error: Error) {
+    super();
+  }
+
+  override async recordDonationSuccess(params: Record<string, unknown>) {
+    await super.recordDonationSuccess(params);
+    throw this.error;
   }
 }
 
@@ -223,7 +280,16 @@ const buildService = (
   audit: AuditLogServiceStub,
   ledger: LedgerServiceStub,
   config: LedgerConfigStub
-) => new DonationCallbackService(connection as never, model as never, audit as never, ledger as never, config as never);
+) => {
+  const connection = new ConnectionStub(model);
+  return new DonationCallbackService(
+    connection as never,
+    model as never,
+    audit as never,
+    ledger as never,
+    config as never
+  );
+};
 
 const creatorId = new Types.ObjectId("6568e95f7f9e4c5d5f000001");
 const donatedAt = new Date("2024-01-01T00:00:00.000Z");
@@ -332,4 +398,31 @@ test("DonationCallbackService logs orphaned callbacks when no donation exists", 
   assert.equal(result.idempotentReplay, false);
   assert.equal(audit.entries.length, 1);
   assert.equal(audit.entries[0]?.outcome, "missing");
+});
+
+test("DonationCallbackService rolls back donation updates when ledger posting fails", async () => {
+  const model = new DonationModelStub();
+  const audit = new AuditLogServiceStub();
+  const ledger = new FailingLedgerServiceStub(new Error("ledger failed"));
+  const config = new LedgerConfigStub();
+  const service = buildService(model, audit, ledger, config);
+  seedDonation(model);
+
+  await assert.rejects(
+    () =>
+      service.processStkPushCallback(createPayload(), verification, {
+        rawEventId: "evt-rollback"
+      }),
+    /ledger failed/
+  );
+
+  const persisted = model.documents.get("checkout-123");
+  assert.ok(persisted);
+  assert.equal(persisted?.status, DonationStatus.Processing);
+  assert.equal(persisted?.amountCents, 0);
+  assert.equal(persisted?.creatorShareCents, 0);
+  assert.equal(persisted?.platformShareCents, 0);
+  assert.equal(persisted?.platformVatCents, 0);
+  assert.equal(persisted?.ledgerJournalEntryId ?? null, null);
+  assert.equal(audit.entries.length, 0);
 });

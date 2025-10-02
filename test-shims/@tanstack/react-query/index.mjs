@@ -1,8 +1,8 @@
-const React = require("../../react");
+import React from "../react/index.js";
 
 let currentClient = null;
 
-class QueryClient {
+export class QueryClient {
   constructor() {
     this.store = new Map();
   }
@@ -29,13 +29,13 @@ class QueryClient {
   }
 }
 
-const QueryClientProvider = ({ client, children }) => {
+export const QueryClientProvider = ({ client, children }) => {
   currentClient = client;
   const rendered = Array.isArray(children) ? children : [children];
   return rendered.length === 1 ? rendered[0] : rendered;
 };
 
-const useQuery = (options) => {
+export const useQuery = (options) => {
   if (!currentClient) {
     throw new Error("QueryClientProvider is missing");
   }
@@ -63,7 +63,7 @@ const useQuery = (options) => {
   return { data: value, isPending: false, isError: false, error: null, refetch: () => {}, isRefetching: false };
 };
 
-const useMutation = (options = {}) => {
+export const useMutation = (options = {}) => {
   const mutationFn = options.mutationFn ?? (() => undefined);
   const execute = async (input) => mutationFn(input);
   return {
@@ -71,7 +71,7 @@ const useMutation = (options = {}) => {
       try {
         execute(input);
       } catch {
-        // swallow errors in stub
+        // ignore errors in stub
       }
     },
     mutateAsync: execute,
@@ -81,17 +81,11 @@ const useMutation = (options = {}) => {
   };
 };
 
-const useQueryClient = () => {
+export const useQueryClient = () => {
   if (!currentClient) {
     throw new Error("QueryClientProvider is missing");
   }
   return currentClient;
 };
 
-module.exports = {
-  QueryClient,
-  QueryClientProvider,
-  useQuery,
-  useMutation,
-  useQueryClient
-};
+export default { QueryClient, QueryClientProvider, useQuery, useMutation, useQueryClient };

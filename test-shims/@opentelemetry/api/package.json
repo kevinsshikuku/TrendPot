@@ -1,0 +1,7 @@
+{
+  "name": "@opentelemetry/api",
+  "version": "0.0.0-test",
+  "type": "module",
+  "main": "index.js",
+  "module": "index.mjs"
+}

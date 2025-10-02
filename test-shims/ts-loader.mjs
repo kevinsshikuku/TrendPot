@@ -15,6 +15,7 @@ const shimMap = new Map([
   ["@fastify/cors", new URL("@fastify/cors/index.js", shimBase).href],
   ["@fastify/helmet", new URL("@fastify/helmet/index.js", shimBase).href],
   ["mongoose", new URL("mongoose/index.js", shimBase).href],
+  ["@opentelemetry/api", new URL("@opentelemetry/api/index.mjs", shimBase).href],
   ["@trendpot/types", new URL("@trendpot/types/index.js", shimBase).href],
   ["@trendpot/utils", new URL("@trendpot/utils/index.js", shimBase).href],
   ["pino", new URL("pino/index.js", shimBase).href],

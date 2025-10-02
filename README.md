@@ -906,6 +906,9 @@ Any unmatched entry sits in 1100 Clearing:MpesaPending until resolved.
 Trial Balance endpoint computes equality of total debits==credits per day and control reconciliation (sum(wallets.availableCents) == GL balance of CreatorsPayable).
 
 
+Regression coverage: donation split math, ledger postings, admin resolvers, and the admin dashboards all have dedicated unit and smoke tests so finance-critical flows fail fast in CI if behavior changes. Historical environments can be aligned using `pnpm --filter worker run backfill:donations --mode=shadow` to simulate the rollout, `--mode=audit` to enumerate mismatches, and `--apply` once the dry run is clean. 【F:apps/api/src/donations/services/donation-distribution.test.ts†L1-L60】【F:apps/api/src/ledger/ledger.service.test.ts†L1-L160】【F:apps/api/src/donations/donation.resolver.test.ts†L1-L140】【F:apps/web/src/app/admin/admin-smoke.test.tsx†L1-L86】【F:apps/worker/src/finance/backfill-donations.ts†L1-L321】
+
+
 Idempotency: Unique batchId per event; journal_entries has unique index on (eventType,eventRefId).
 
 

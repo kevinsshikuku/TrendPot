@@ -4,9 +4,11 @@ export const Resolver = decorator;
 export const Query = decorator;
 export const Mutation = decorator;
 export const Args = decorator;
+export const Context = decorator;
 export const ObjectType = decorator;
 export const Field = decorator;
 export const InputType = decorator;
+export const ID = {};
 export const Int = {};
 export const Float = {};
 export const GraphQLISODateTime = {};
@@ -45,9 +47,11 @@ const defaultExport = {
   Query,
   Mutation,
   Args,
+  Context,
   ObjectType,
   Field,
   InputType,
+  ID,
   Int,
   Float,
   GraphQLISODateTime,
