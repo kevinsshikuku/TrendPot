@@ -134,6 +134,7 @@ export type PayoutNotificationConnection = z.infer<typeof payoutNotificationConn
 
 export const PAYOUT_SCHEDULING_QUEUE = "payouts:schedule" as const;
 export const PAYOUT_DISBURSEMENT_QUEUE = "payouts:disburse" as const;
+export const FINANCE_RECONCILIATION_QUEUE = "finance:reconcile" as const;
 
 export const payoutSchedulingJobSchema = z.object({
   reason: z.enum(["scheduled", "manual", "retry"]).default("scheduled"),
@@ -149,3 +150,13 @@ export const payoutDisbursementJobSchema = z.object({
 
 export type PayoutSchedulingJob = z.infer<typeof payoutSchedulingJobSchema>;
 export type PayoutDisbursementJob = z.infer<typeof payoutDisbursementJobSchema>;
+export const financeReconciliationJobSchema = z.object({
+  reason: z.enum(["scheduled", "manual", "retry"]).default("scheduled"),
+  requestedAt: z.string().datetime(),
+  windowStart: z.string().datetime().optional(),
+  windowEnd: z.string().datetime().optional(),
+  toleranceCents: z.number().int().nonnegative().optional(),
+  requestId: z.string().optional()
+});
+
+export type FinanceReconciliationJob = z.infer<typeof financeReconciliationJobSchema>;

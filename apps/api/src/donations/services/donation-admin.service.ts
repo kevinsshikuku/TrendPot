@@ -13,6 +13,13 @@ import {
   CompanyLedgerEntryEntity,
   type CompanyLedgerEntryDocument
 } from "../../ledger/schemas/company-ledger-entry.schema";
+import { apiLogger } from "../../observability/logger";
+import {
+  adminDonationMetricsHistogram,
+  adminDonationQueryHistogram,
+  apiTracer
+} from "../../observability/telemetry";
+import { SpanStatusCode } from "@opentelemetry/api";
 
 export interface AdminDonationFilter {
   statuses?: DonationStatus[] | null;
@@ -42,6 +49,8 @@ interface DonationRecord extends DonationEntity {
 
 @Injectable()
 export class DonationAdminService {
+  private readonly logger = apiLogger.child({ module: "DonationAdminService" });
+
   constructor(
     @InjectModel(DonationEntity.name)
     private readonly donationModel: Model<DonationDocument>,
@@ -51,108 +60,184 @@ export class DonationAdminService {
   ) {}
 
   async listDonations(params: AdminDonationListParams = {}): Promise<AdminDonationConnectionModel> {
-    const limit = this.sanitizeLimit(params.first);
-    const cursor = this.parseCursor(params.after);
-    const match = this.buildMatch(params.filter ?? undefined);
+    const span = apiTracer.startSpan("donations.admin.list", {
+      attributes: {
+        hasFilter: params.filter ? true : false
+      }
+    });
+    const start = Date.now();
 
-    const filters: FilterQuery<DonationDocument>[] = [];
-    if (Object.keys(match).length > 0) {
-      filters.push(match);
+    try {
+      const limit = this.sanitizeLimit(params.first);
+      const cursor = this.parseCursor(params.after);
+      const match = this.buildMatch(params.filter ?? undefined);
+
+      const filters: FilterQuery<DonationDocument>[] = [];
+      if (Object.keys(match).length > 0) {
+        filters.push(match);
+      }
+      if (cursor) {
+        filters.push({ _id: { $lt: cursor } });
+      }
+
+      const query = filters.length > 0 ? { $and: filters } : {};
+
+      const documents = await this.donationModel
+        .find(query)
+        .sort({ _id: -1 })
+        .limit(limit + 1)
+        .lean<DonationRecord[]>();
+
+      const hasNextPage = documents.length > limit;
+      const window = hasNextPage ? documents.slice(0, -1) : documents;
+
+      const edges = window.map((doc) => ({
+        cursor: doc._id.toString(),
+        node: this.mapDonation(doc)
+      }));
+
+      const endCursor = edges.length > 0 ? edges[edges.length - 1]?.cursor ?? null : null;
+
+      const totals = await this.computeTotals(match);
+
+      const duration = Date.now() - start;
+      adminDonationQueryHistogram.record(duration, {
+        hasFilter: Object.keys(match).length > 0 ? 1 : 0
+      });
+      span.setStatus({ code: SpanStatusCode.OK });
+      span.setAttribute("result.count", totals.count);
+      span.setAttribute("result.gross", totals.grossAmountCents);
+      this.logger.debug(
+        {
+          event: "donation.admin.list",
+          filter: params.filter ?? null,
+          durationMs: duration,
+          resultCount: totals.count
+        },
+        "Admin donation list query completed"
+      );
+
+      return {
+        edges,
+        pageInfo: {
+          endCursor,
+          hasNextPage
+        },
+        totals
+      };
+    } catch (error) {
+      span.recordException(error as Error);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
+      this.logger.error(
+        { event: "donation.admin.list.failed", error: (error as Error).message },
+        "Admin donation list query failed"
+      );
+      throw error;
+    } finally {
+      span.end();
     }
-    if (cursor) {
-      filters.push({ _id: { $lt: cursor } });
-    }
-
-    const query = filters.length > 0 ? { $and: filters } : {};
-
-    const documents = await this.donationModel
-      .find(query)
-      .sort({ _id: -1 })
-      .limit(limit + 1)
-      .lean<DonationRecord[]>();
-
-    const hasNextPage = documents.length > limit;
-    const window = hasNextPage ? documents.slice(0, -1) : documents;
-
-    const edges = window.map((doc) => ({
-      cursor: doc._id.toString(),
-      node: this.mapDonation(doc)
-    }));
-
-    const endCursor = edges.length > 0 ? edges[edges.length - 1]?.cursor ?? null : null;
-
-    const totals = await this.computeTotals(match);
-
-    return {
-      edges,
-      pageInfo: {
-        endCursor,
-        hasNextPage
-      },
-      totals
-    };
   }
 
   async getMetrics(filter?: AdminDonationFilter | null): Promise<AdminDonationMetricsModel> {
-    const normalizedFilter = this.ensureSucceededDefault(filter ?? undefined);
-    const match = this.buildMatch(normalizedFilter);
+    const span = apiTracer.startSpan("donations.admin.metrics", {
+      attributes: {
+        hasFilter: Boolean(filter && Object.keys(filter).length > 0)
+      }
+    });
+    const start = Date.now();
 
-    const dailyTotals = await this.buildTimeSeries(match, "day", 7);
-    const weeklyTotals = await this.buildTimeSeries(match, "week", 8);
-    const monthlyTotals = await this.buildTimeSeries(match, "month", 6);
+    try {
+      const normalizedFilter = this.ensureSucceededDefault(filter ?? undefined);
+      const match = this.buildMatch(normalizedFilter);
 
-    const [vatSummary] = await this.donationModel.aggregate<{ vat: number }>([
-      { $match: match },
-      {
-        $group: {
-          _id: null,
-          vat: { $sum: { $ifNull: ["$platformVatCents", 0] } }
+      const dailyTotals = await this.buildTimeSeries(match, "day", 7);
+      const weeklyTotals = await this.buildTimeSeries(match, "week", 8);
+      const monthlyTotals = await this.buildTimeSeries(match, "month", 6);
+
+      const [vatSummary] = await this.donationModel.aggregate<{ vat: number }>([
+        { $match: match },
+        {
+          $group: {
+            _id: null,
+            vat: { $sum: { $ifNull: ["$platformVatCents", 0] } }
+          }
         }
-      }
-    ]);
+      ]);
 
-    const pendingMatch: FilterQuery<DonationDocument> = {
-      ...match,
-      payoutState: {
-        $in:
-          normalizedFilter?.payoutStates && normalizedFilter.payoutStates.length > 0
-            ? normalizedFilter.payoutStates
-            : [
-                DonationPayoutState.Unassigned,
-                DonationPayoutState.Scheduled,
-                DonationPayoutState.Processing
-              ]
-      }
-    };
-
-    const [pendingSummary] = await this.donationModel.aggregate<{ amount: number }>([
-      { $match: pendingMatch },
-      {
-        $group: {
-          _id: null,
-          amount: { $sum: { $ifNull: ["$creatorShareCents", 0] } }
+      const pendingMatch: FilterQuery<DonationDocument> = {
+        ...match,
+        payoutState: {
+          $in:
+            normalizedFilter?.payoutStates && normalizedFilter.payoutStates.length > 0
+              ? normalizedFilter.payoutStates
+              : [
+                  DonationPayoutState.Unassigned,
+                  DonationPayoutState.Scheduled,
+                  DonationPayoutState.Processing
+                ]
         }
-      }
-    ]);
+      };
 
-    const [ledgerSummary] = await this.companyLedgerModel.aggregate<{ balance: number }>([
-      { $match: { currency: this.ledgerConfig.getLedgerCurrency() } },
-      {
-        $group: {
-          _id: null,
-          balance: { $sum: { $ifNull: ["$cashDeltaCents", 0] } }
+      const [pendingSummary] = await this.donationModel.aggregate<{ amount: number }>([
+        { $match: pendingMatch },
+        {
+          $group: {
+            _id: null,
+            amount: { $sum: { $ifNull: ["$creatorShareCents", 0] } }
+          }
         }
-      }
-    ]);
+      ]);
 
-    return {
-      dailyTotals,
-      weeklyTotals,
-      monthlyTotals,
-      vatCollectedCents: vatSummary?.vat ?? 0,
-      pendingPayoutCents: pendingSummary?.amount ?? 0,
-      outstandingClearingBalanceCents: ledgerSummary?.balance ?? 0
-    };
+      const [ledgerSummary] = await this.companyLedgerModel.aggregate<{ balance: number }>([
+        { $match: { currency: this.ledgerConfig.getLedgerCurrency() } },
+        {
+          $group: {
+            _id: null,
+            balance: { $sum: { $ifNull: ["$cashDeltaCents", 0] } }
+          }
+        }
+      ]);
+
+      const result = {
+        dailyTotals,
+        weeklyTotals,
+        monthlyTotals,
+        vatCollectedCents: vatSummary?.vat ?? 0,
+        pendingPayoutCents: pendingSummary?.amount ?? 0,
+        outstandingClearingBalanceCents: ledgerSummary?.balance ?? 0
+      };
+
+      const duration = Date.now() - start;
+      adminDonationMetricsHistogram.record(duration, {
+        hasFilter: normalizedFilter ? 1 : 0
+      });
+      span.setStatus({ code: SpanStatusCode.OK });
+      span.setAttribute("vat.collected", result.vatCollectedCents);
+      span.setAttribute("payout.pending", result.pendingPayoutCents);
+      span.setAttribute("ledger.clearing", result.outstandingClearingBalanceCents);
+      this.logger.debug(
+        {
+          event: "donation.admin.metrics",
+          durationMs: duration,
+          filter: filter ?? null,
+          vatCollectedCents: result.vatCollectedCents,
+          pendingPayoutCents: result.pendingPayoutCents
+        },
+        "Admin donation metrics query completed"
+      );
+
+      return result;
+    } catch (error) {
+      span.recordException(error as Error);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
+      this.logger.error(
+        { event: "donation.admin.metrics.failed", error: (error as Error).message },
+        "Admin donation metrics query failed"
+      );
+      throw error;
+    } finally {
+      span.end();
+    }
   }
 
   private sanitizeLimit(limit?: number | null): number {

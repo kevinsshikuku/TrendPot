@@ -897,6 +897,8 @@ On failure: mark item failed, rollback wallet change, requeue with exponential b
 15.10) Reconciliation & Controls
 Daily import M‑Pesa statements → mpesa_transactions; 1:1 match to donations and payout_items by IDs + amounts.
 
+Finance worker runs the `finance:reconcile` queue on an interval (default 12h; override via `FINANCE_RECONCILIATION_INTERVAL_MS`) to compare donation, payout, ledger, and statement sums within the configured lookback window (`FINANCE_RECONCILIATION_LOOKBACK_MS`). Variances beyond `FINANCE_RECONCILIATION_TOLERANCE_CENTS` (default KES 2) trigger structured alerts to `FINANCE_ALERTS_WEBHOOK_URL` for operator action.
+
 
 Any unmatched entry sits in 1100 Clearing:MpesaPending until resolved.
 

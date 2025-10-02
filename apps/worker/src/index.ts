@@ -2,8 +2,10 @@ import { Queue, QueueScheduler, Worker } from "bullmq";
 import IORedis from "ioredis";
 import { TikTokManagedKeyProvider, TikTokTokenCipher, withRetries } from "@trendpot/utils";
 import {
+  FINANCE_RECONCILIATION_QUEUE,
   PAYOUT_DISBURSEMENT_QUEUE,
   PAYOUT_SCHEDULING_QUEUE,
+  FinanceReconciliationJob,
   PayoutDisbursementJob,
   PayoutSchedulingJob,
   TIKTOK_INGESTION_QUEUE,
@@ -16,6 +18,9 @@ import { workerLogger } from "./logger";
 import { createInitialSyncJobHandler, createMetricsRefreshJobHandler } from "./tiktok/tiktok-jobs";
 import { createPayoutSchedulerHandler } from "./payouts/payout-scheduler";
 import { createPayoutDisbursementHandler } from "./payouts/payout-disburser";
+import { createFinanceReconciliationHandler } from "./finance/reconciliation-job";
+import { sendFinanceAlert } from "./finance/alerting";
+import { payoutFailureCounter } from "./telemetry";
 
 const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
 const baseConnection = new IORedis(redisUrl);
@@ -66,6 +71,10 @@ const payoutDisbursementQueue = new Queue<PayoutDisbursementJob>(PAYOUT_DISBURSE
   }
 });
 
+const financeReconciliationQueue = new Queue<FinanceReconciliationJob>(FINANCE_RECONCILIATION_QUEUE, {
+  connection: queueConnection
+});
+
 const ingestionScheduler = new QueueScheduler(TIKTOK_INGESTION_QUEUE, {
   connection: schedulerConnection.duplicate()
 });
@@ -78,11 +87,15 @@ const payoutSchedulingScheduler = new QueueScheduler(PAYOUT_SCHEDULING_QUEUE, {
 const payoutDisbursementScheduler = new QueueScheduler(PAYOUT_DISBURSEMENT_QUEUE, {
   connection: schedulerConnection.duplicate()
 });
+const financeReconciliationScheduler = new QueueScheduler(FINANCE_RECONCILIATION_QUEUE, {
+  connection: schedulerConnection.duplicate()
+});
 
 void ingestionScheduler.waitUntilReady();
 void refreshScheduler.waitUntilReady();
 void payoutSchedulingScheduler.waitUntilReady();
 void payoutDisbursementScheduler.waitUntilReady();
+void financeReconciliationScheduler.waitUntilReady();
 
 const bootstrap = async () => {
   const keyProvider = new TikTokManagedKeyProvider();
@@ -112,6 +125,7 @@ const bootstrap = async () => {
     disbursementQueue: payoutDisbursementQueue
   });
   const payoutDisbursementHandler = createPayoutDisbursementHandler();
+  const financeReconciliationHandler = createFinanceReconciliationHandler();
 
   const ingestionWorker = new Worker(
     ingestionQueue.name,
@@ -158,6 +172,15 @@ const bootstrap = async () => {
     }
   );
 
+  const reconciliationWorker = new Worker(
+    financeReconciliationQueue.name,
+    async (job) => financeReconciliationHandler(job),
+    {
+      connection: baseConnection.duplicate(),
+      concurrency: 1
+    }
+  );
+
   const schedulerIntervalMs = Number(process.env.PAYOUT_SCHEDULER_INTERVAL_MS ?? 300_000);
   await payoutSchedulingQueue.add(
     "tick",
@@ -165,6 +188,17 @@ const bootstrap = async () => {
     {
       jobId: "payout-scheduler",
       repeat: { every: Math.max(60_000, schedulerIntervalMs) },
+      removeOnComplete: true
+    }
+  );
+
+  const reconciliationIntervalMs = Number(process.env.FINANCE_RECONCILIATION_INTERVAL_MS ?? 43_200_000);
+  await financeReconciliationQueue.add(
+    "tick",
+    { reason: "scheduled", requestedAt: new Date().toISOString() },
+    {
+      jobId: "finance-reconciliation",
+      repeat: { every: Math.max(3_600_000, reconciliationIntervalMs) },
       removeOnComplete: true
     }
   );
@@ -226,16 +260,41 @@ const bootstrap = async () => {
   });
 
   payoutDisbursementWorker.on("failed", (job, err) => {
+    payoutFailureCounter.add(1, { stage: "disbursement" });
     workerLogger.error(
       { jobId: job?.id, queue: job?.queueName, err: err.message },
       "Payout disbursement job failed"
     );
+    void sendFinanceAlert({
+      event: "finance.payout.disbursement_failed",
+      severity: "critical",
+      message: "A payout disbursement job failed",
+      context: {
+        jobId: job?.id,
+        queue: job?.queueName,
+        error: err.message
+      }
+    });
   });
 
   payoutDisbursementWorker.on("completed", (job, result) => {
     workerLogger.info(
       { jobId: job.id, queue: job.queueName, result },
       "Payout disbursement job completed"
+    );
+  });
+
+  reconciliationWorker.on("completed", (job, result) => {
+    workerLogger.info(
+      { jobId: job.id, queue: job.queueName, result },
+      "Finance reconciliation job completed"
+    );
+  });
+
+  reconciliationWorker.on("failed", (job, err) => {
+    workerLogger.error(
+      { jobId: job?.id, queue: job?.queueName, err: err.message },
+      "Finance reconciliation job failed"
     );
   });
 
@@ -247,7 +306,8 @@ const bootstrap = async () => {
         ingestionQueue.name,
         refreshQueue.name,
         payoutSchedulingQueue.name,
-        payoutDisbursementQueue.name
+        payoutDisbursementQueue.name,
+        financeReconciliationQueue.name
       ],
       keyId: tokenCipher.keyId
     },
