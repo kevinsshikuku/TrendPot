@@ -1,6 +1,6 @@
 import { Field, ObjectType } from "@nestjs/graphql";
 import { GraphQLISODateTime } from "@nestjs/graphql";
-import { DonationStatus } from "../donation.schema";
+import { DonationStatus } from "../donation-status.enum";
 
 @ObjectType("DonationStatusChange")
 export class DonationStatusChangeModel {

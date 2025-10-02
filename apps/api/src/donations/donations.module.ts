@@ -1,13 +1,22 @@
 import { Module } from "@nestjs/common";
 import { MongooseModule } from "@nestjs/mongoose";
+import { ChallengeEntity, ChallengeSchema } from "../models/challenge.schema";
+import { SubmissionEntity, SubmissionSchema } from "../models/submission.schema";
 import { DarajaClient } from "../mpesa/daraja.client";
 import { DonationResolver } from "./donation.resolver";
-import { DonationService } from "./donation.service";
 import { DonationEntity, DonationSchema } from "./donation.schema";
+import { DonationCallbackService } from "./services/donation-callback.service";
+import { DonationRequestsService } from "./services/donation-requests.service";
 
 @Module({
-  imports: [MongooseModule.forFeature([{ name: DonationEntity.name, schema: DonationSchema }])],
-  providers: [DonationService, DonationResolver, DarajaClient],
-  exports: [DonationService]
+  imports: [
+    MongooseModule.forFeature([
+      { name: DonationEntity.name, schema: DonationSchema },
+      { name: SubmissionEntity.name, schema: SubmissionSchema },
+      { name: ChallengeEntity.name, schema: ChallengeSchema }
+    ])
+  ],
+  providers: [DonationRequestsService, DonationCallbackService, DonationResolver, DarajaClient],
+  exports: [DonationRequestsService, DonationCallbackService]
 })
 export class DonationsModule {}

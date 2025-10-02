@@ -1,0 +1,41 @@
+# M-Pesa donation and payout flow
+
+## 1. Donor checkout and STK push initiation
+1. The web app invokes the `requestStkPush` GraphQL mutation after basic auth, rate-limit, and profile checks succeed. The resolver passes the donor, submission, amount, MSISDN, and idempotency key into the donation service with the current request logger. 【F:apps/api/src/donations/donation.resolver.ts†L13-L40】
+2. `DonationService.requestStkPush` validates the payload: positive whole-shilling amounts, normalized MSISDNs, sanitized account references/descriptions, and a SHA-256 idempotency hash to dedupe repeats. If the hash already exists, the existing donation snapshot is returned. 【F:apps/api/src/donations/donation.service.ts†L350-L462】
+3. A new donation document is created with pending status, base status history, and the normalized account reference before the STK push is attempted. 【F:apps/api/src/donations/donation.service.ts†L464-L478】
+4. The service calls `DarajaClient.requestStkPush`, logging request metadata to aid traceability. 【F:apps/api/src/donations/donation.service.ts†L488-L496】【F:apps/api/src/mpesa/daraja.client.ts†L141-L155】
+
+## 2. Daraja STK push implementation details
+1. `DarajaClient` centralizes configuration for environment base URLs, consumer credentials, short code, passkey, and callback URL, encrypting the consumer key/secret using AES-GCM and caching the encrypted blob. Missing configuration fails fast. 【F:apps/api/src/mpesa/daraja.client.ts†L68-L139】
+2. Every STK push call computes the Daraja password (`Base64(shortCode + passkey + timestamp)`), supplies the documented payload fields, and retries transient failures with exponential backoff. 【F:apps/api/src/mpesa/daraja.client.ts†L157-L199】
+3. Access tokens are fetched from `/oauth/v1/generate?grant_type=client_credentials`, decrypted on demand, cached with a one-minute safety margin, and refreshed when expired. 【F:apps/api/src/mpesa/daraja.client.ts†L217-L239】
+4. Successful responses update the donation with the returned `CheckoutRequestID`, `MerchantRequestID`, response description, and status history; failures mark the donation failed with the error message. 【F:apps/api/src/donations/donation.service.ts†L498-L560】
+
+**Daraja parity check.** Safaricom Daraja’s STK push specification requires the exact fields emitted here: `BusinessShortCode`, computed `Password`, `Timestamp`, `TransactionType="CustomerPayBillOnline"`, `Amount`, `PartyA/PartyB`, `PhoneNumber`, `CallBackURL`, `AccountReference`, and `TransactionDesc`. The client also honours the OAuth flow, short code credential checks, and retry/backoff guidance from the public API docs. The main configuration prerequisite is supplying the production callback URL and webhook public certificate in environment variables.
+
+## 3. Webhook intake and signature verification
+1. Safaricom’s callback posts to `POST /webhooks/mpesa/stkpush`. The controller captures the raw body, verifies the RSA signature + timestamp tolerance, and persists a webhook event record (including headers and verification result) for auditing. 【F:apps/api/src/webhooks/mpesa.controller.ts†L27-L57】
+2. Invalid signatures are logged, written to the audit log with reasons, and rejected with HTTP 400 so the upstream can retry. Valid payloads are enqueued for asynchronous processing together with metadata (request id, source IP). 【F:apps/api/src/webhooks/mpesa.controller.ts†L70-L121】
+3. `MpesaSignatureService` enforces required headers, configurable skew tolerance, and RSA-SHA256 validation against the configured Safaricom public certificate. Failures emit structured logs that highlight missing headers, stale timestamps, or signature mismatches. 【F:apps/api/src/webhooks/mpesa-signature.service.ts†L21-L100】
+4. The BullMQ-backed `MpesaCallbackQueue` spins up when Redis is available, dispatching jobs to `DonationService.processStkPushCallback` with retries and falling back to inline execution if the queue is disabled (tests) or unavailable. 【F:apps/api/src/webhooks/mpesa-callback.queue.ts†L25-L136】
+
+## 4. Donation state transitions after a callback
+1. Callbacks are parsed to extract checkout IDs, metadata items (amount, receipt, phone, transaction date, account reference), and result codes. Unknown payloads are ignored but logged and audited. 【F:apps/api/src/donations/donation.service.ts†L65-L276】
+2. Processing happens inside a MongoDB transaction to guarantee atomic updates. A missing donation creates a new record with the callback data; existing donations are updated unless the message is an idempotent replay (matching amount/receipt/status). 【F:apps/api/src/donations/donation.service.ts†L98-L167】【F:apps/api/src/donations/donation.service.ts†L299-L315】
+3. Each processed callback records an audit event, redacts sensitive fields for logs, and exposes helpers to mask MSISDNs before logging. 【F:apps/api/src/donations/donation.service.ts†L169-L340】
+4. The donation schema enforces a unique `mpesaCheckoutRequestId`, stores receipts, payer phones, raw payloads, and timestamps so downstream ledgers and reconciliation can cross-reference Safaricom artifacts. 【F:apps/api/src/donations/donation.schema.ts†L13-L59】
+
+## 5. Creator payout lifecycle
+1. Once donations clear (`status=paid`), the payouts subsystem surfaces them to creators with payout states (`unassigned` → `scheduled` → `processing` → `paid/failed`) alongside donation metadata and availability dates. 【F:apps/api/src/payouts/schemas/donation.schema.ts†L14-L53】【F:apps/api/src/payouts/models/donation-payout-state.enum.ts†L1-L10】
+2. `PayoutsService.listCreatorDonations` implements cursor-based pagination, aggregates lifetime/pending/available totals, and prepares 14-day trend points so creators can monitor progress toward payouts. 【F:apps/api/src/payouts/payouts.service.ts†L20-L199】
+3. Scheduled payout batches capture grouped transfers with status tracking and totals, exposed through GraphQL connections for creators to review. 【F:apps/api/src/payouts/schemas/payout-batch.schema.ts†L1-L33】【F:apps/api/src/payouts/payouts.service.ts†L200-L272】
+4. Payout notifications summarize state changes (scheduled, processing, paid, failed) and support marking items read, helping creators stay informed. 【F:apps/api/src/payouts/payouts.service.ts†L200-L320】
+5. The README documents the accounting expectations: reconciling statements, maintaining creator wallet balances, and executing eventual B2C payouts that debit the paybill account once batches are processed. 【F:README.md†L620-L905】
+
+## 6. Observations and follow-up items
+- **Schema mismatch:** `DonationSchema` currently marks `mpesaCheckoutRequestId` as required, yet `requestStkPush` creates documents before that field exists; ensure the schema allows null until Safaricom returns the ID or populate the field immediately to avoid validation failures. 【F:apps/api/src/donations/donation.schema.ts†L20-L59】【F:apps/api/src/donations/donation.service.ts†L464-L518】
+- **B2C execution stub:** The payout data model and accounting guidance are present, but no worker currently invokes the Daraja B2C API—implementing that job (with reconciliation against `mpesa_transactions`) remains outstanding. 【F:apps/api/src/payouts/payouts.service.ts†L20-L320】【F:README.md†L831-L905】
+- **Credential management:** Production deployments must provision `MPESA_WEBHOOK_PUBLIC_CERT` and KMS-backed credential keys so signature verification and OAuth encryption stay aligned with Safaricom requirements. 【F:apps/api/src/mpesa/daraja.client.ts†L68-L139】【F:apps/api/src/webhooks/mpesa-signature.service.ts†L21-L119】
+
+Overall, the code path covers Daraja STK push best practices—validated inputs, credential hygiene, OAuth token caching, signed webhook enforcement, audit logs, and idempotent processing—and prepares downstream payout artefacts ready for the B2C disbursement job.

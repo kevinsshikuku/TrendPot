@@ -1,13 +1,9 @@
 import { registerEnumType } from "@nestjs/graphql";
-
-export enum DonationStatus {
-  Pending = "pending",
-  Succeeded = "succeeded",
-  Refunded = "refunded",
-  Failed = "failed"
-}
+import { DonationStatus } from "../../donations/donation-status.enum";
 
 registerEnumType(DonationStatus, {
   name: "DonationStatus",
   description: "Lifecycle status of a donor contribution."
 });
+
+export { DonationStatus };

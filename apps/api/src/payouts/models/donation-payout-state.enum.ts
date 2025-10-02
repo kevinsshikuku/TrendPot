@@ -1,14 +1,9 @@
 import { registerEnumType } from "@nestjs/graphql";
-
-export enum DonationPayoutState {
-  Unassigned = "unassigned",
-  Scheduled = "scheduled",
-  Processing = "processing",
-  Paid = "paid",
-  Failed = "failed"
-}
+import { DonationPayoutState } from "../../donations/donation-payout-state.enum";
 
 registerEnumType(DonationPayoutState, {
   name: "DonationPayoutState",
-  description: "Payout lifecycle state for a donation once it has cleared."
+  description: "Lifecycle state of a donation within the payout pipeline."
 });
+
+export { DonationPayoutState };

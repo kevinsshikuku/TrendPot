@@ -18,6 +18,11 @@ import type {
   DonationHistoryEntry,
   DonationSubmissionContext
 } from "./donations";
+import {
+  creatorDonationConnectionSchema,
+  payoutBatchConnectionSchema,
+  payoutNotificationConnectionSchema
+} from "./payouts";
 
 
 export interface TrendPotGraphQLClientOptions {
@@ -265,10 +270,17 @@ const DONATION_QUERY = /* GraphQL */ `
     donation(id: $id) {
       id
       submissionId
+      challengeId
+      creatorUserId
       donorUserId
       amountCents
+      platformFeeCents
+      creatorShareCents
+      platformShareCents
+      platformVatCents
       currency
       status
+      payoutState
       statusHistory {
         status
         occurredAt
@@ -295,10 +307,17 @@ const DONATION_BY_CHECKOUT_QUERY = /* GraphQL */ `
     donationByCheckout(checkoutRequestId: $checkoutRequestId) {
       id
       submissionId
+      challengeId
+      creatorUserId
       donorUserId
       amountCents
+      platformFeeCents
+      creatorShareCents
+      platformShareCents
+      platformVatCents
       currency
       status
+      payoutState
       statusHistory {
         status
         occurredAt
@@ -325,10 +344,17 @@ const REQUEST_STK_PUSH_MUTATION = /* GraphQL */ `
     requestStkPush(input: $input) {
       id
       submissionId
+      challengeId
+      creatorUserId
       donorUserId
       amountCents
+      platformFeeCents
+      creatorShareCents
+      platformShareCents
+      platformVatCents
       currency
       status
+      payoutState
       statusHistory {
         status
         occurredAt
@@ -797,17 +823,30 @@ const REQUEST_STK_PUSH_MUTATION = /* GraphQL */ `
     requestStkPush(input: $input) {
       id
       submissionId
+      challengeId
+      creatorUserId
+      donorUserId
       amountCents
+      platformFeeCents
+      creatorShareCents
+      platformShareCents
+      platformVatCents
       currency
       status
-      phoneNumber
+      payoutState
+      statusHistory {
+        status
+        occurredAt
+        description
+      }
       mpesaCheckoutRequestId
-      mpesaReceipt
+      mpesaMerchantRequestId
       failureReason
-      idempotencyKey
-      donorDisplayName
+      lastResponseDescription
+      accountReference
       createdAt
       updatedAt
+      version
     }
   }
 `;
@@ -821,17 +860,30 @@ const DONATION_QUERY = /* GraphQL */ `
     donation(id: $id) {
       id
       submissionId
+      challengeId
+      creatorUserId
+      donorUserId
       amountCents
+      platformFeeCents
+      creatorShareCents
+      platformShareCents
+      platformVatCents
       currency
       status
-      phoneNumber
+      payoutState
+      statusHistory {
+        status
+        occurredAt
+        description
+      }
       mpesaCheckoutRequestId
-      mpesaReceipt
+      mpesaMerchantRequestId
       failureReason
-      idempotencyKey
-      donorDisplayName
+      lastResponseDescription
+      accountReference
       createdAt
       updatedAt
+      version
     }
   }
 `;
@@ -845,18 +897,29 @@ const DONATION_HISTORY_QUERY = /* GraphQL */ `
     viewerDonationHistory(first: $first) {
       id
       submissionId
+      challengeId
+      creatorUserId
+      donorUserId
       amountCents
+      platformFeeCents
+      creatorShareCents
+      platformShareCents
+      platformVatCents
       currency
       status
-      phoneNumber
+      payoutState
+      statusHistory {
+        status
+        occurredAt
+        description
+      }
       mpesaCheckoutRequestId
-      mpesaReceipt
+      mpesaMerchantRequestId
       failureReason
-      idempotencyKey
-      donorDisplayName
+      lastResponseDescription
+      accountReference
       createdAt
       updatedAt
-      challengeId
       challengeTitle
       challengeTagline
       challengeShareUrl

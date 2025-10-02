@@ -1,26 +1,49 @@
 import { z } from "zod";
+import { donationPayoutStateSchema } from "./payouts";
 export const donationStatusSchema = z.enum([
   "pending",
   "processing",
   "succeeded",
-  "failed"
+  "failed",
+  "refunded"
 ]);
 
 
 export const donationSchema = z.object({
   id: z.string(),
   submissionId: z.string(),
+  challengeId: z.string(),
+  creatorUserId: z.string(),
+  donorUserId: z.string(),
   amountCents: z.number().int().nonnegative(),
+  platformFeeCents: z.number().int().nonnegative(),
+  creatorShareCents: z.number().int().nonnegative(),
+  platformShareCents: z.number().int().nonnegative(),
+  platformVatCents: z.number().int().nonnegative(),
   currency: z.string().length(3),
   status: donationStatusSchema,
+  payoutState: donationPayoutStateSchema,
+  statusHistory: z
+    .array(
+      z.object({
+        status: donationStatusSchema,
+        occurredAt: z.string(),
+        description: z.string().nullable().optional()
+      })
+    )
+    .default([]),
   phoneNumber: z.string().nullable().optional(),
   mpesaCheckoutRequestId: z.string().nullable().optional(),
+  mpesaMerchantRequestId: z.string().nullable().optional(),
   mpesaReceipt: z.string().nullable().optional(),
+  accountReference: z.string().nullable().optional(),
   failureReason: z.string().nullable().optional(),
+  lastResponseDescription: z.string().nullable().optional(),
   idempotencyKey: z.string().nullable().optional(),
   donorDisplayName: z.string().nullable().optional(),
   createdAt: z.string(),
-  updatedAt: z.string()
+  updatedAt: z.string(),
+  version: z.number().int().nonnegative().optional()
 });
 
 export const donationHistoryEntrySchema = donationSchema.extend({

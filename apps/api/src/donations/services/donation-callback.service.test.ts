@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DonationService, MpesaStkPushCallbackPayload } from "./donation.service";
-import { DonationStatus } from "./donation-status.enum";
-import type { SignatureVerificationResult } from "../webhooks/mpesa-signature.service";
+import { DonationCallbackService, MpesaStkPushCallbackPayload } from "./donation-callback.service";
+import { DonationStatus } from "../donation-status.enum";
+import type { SignatureVerificationResult } from "../../webhooks/mpesa-signature.service";
 
 interface DonationRecord {
   _id: string;
@@ -61,6 +61,7 @@ class DonationModelStub {
 
   findOneAndUpdate(filter: Record<string, unknown>, update: Record<string, unknown>) {
     const match = this.lookupByFilter(filter);
+    const documents = this.documents;
 
     const query = {
       async exec() {
@@ -68,9 +69,11 @@ class DonationModelStub {
           return null;
         }
 
+        const set = (update as { $set?: Partial<DonationRecord> } | undefined)?.$set ?? {};
+
         const patched: DonationRecord = {
           ...match,
-          ...(update.$set as Partial<DonationRecord>)
+          ...set
         };
 
         match.amountCents = patched.amountCents;
@@ -85,8 +88,18 @@ class DonationModelStub {
         match.rawCallback = patched.rawCallback;
         match.lastCallbackAt = patched.lastCallbackAt;
 
+        const push = (update as { $push?: { statusHistory?: unknown } } | undefined)?.$push;
+        if (push?.statusHistory) {
+          if (!Array.isArray((match as { statusHistory?: unknown }).statusHistory)) {
+            (match as { statusHistory?: unknown }).statusHistory = [];
+          }
+          ((match as { statusHistory?: unknown }).statusHistory as unknown[]).push(
+            structuredClone(push.statusHistory)
+          );
+        }
+
         if (match.mpesaCheckoutRequestId) {
-          this.documents.set(match.mpesaCheckoutRequestId, match);
+          documents.set(match.mpesaCheckoutRequestId, match);
         }
 
         return structuredClone(match);
@@ -157,27 +170,39 @@ const verification: SignatureVerificationResult = { valid: true };
 const connection = new ConnectionStub();
 
 const buildService = (model: DonationModelStub, audit: AuditLogServiceStub) =>
-  new DonationService(connection as never, model as never, audit as never);
+  new DonationCallbackService(connection as never, model as never, audit as never);
 
-test("DonationService processes new callbacks and records audit entries", async () => {
+const seedDonation = (model: DonationModelStub) => {
+  model.documents.set("checkout-123", {
+    _id: "1",
+    mpesaCheckoutRequestId: "checkout-123",
+    merchantRequestId: "merchant-1",
+    amountCents: 0,
+    status: DonationStatus.Processing
+  });
+};
+
+test("DonationCallbackService updates existing donations and records audit entries", async () => {
   const model = new DonationModelStub();
   const audit = new AuditLogServiceStub();
   const service = buildService(model, audit);
+  seedDonation(model);
 
   const result = await service.processStkPushCallback(createPayload(), verification, {
     rawEventId: "evt-1"
   });
 
   assert.equal(result.idempotentReplay, false);
-  assert.equal(model.documents.size, 1);
+  assert.equal(model.documents.get("checkout-123")?.status, DonationStatus.Succeeded);
   assert.equal(audit.entries.length, 1);
   assert.equal(audit.entries[0]?.outcome, "processed");
 });
 
-test("DonationService marks idempotent replays and avoids duplicate writes", async () => {
+test("DonationCallbackService marks idempotent replays and avoids duplicate writes", async () => {
   const model = new DonationModelStub();
   const audit = new AuditLogServiceStub();
   const service = buildService(model, audit);
+  seedDonation(model);
 
   await service.processStkPushCallback(createPayload(), verification, {
     rawEventId: "evt-1"
@@ -188,7 +213,22 @@ test("DonationService marks idempotent replays and avoids duplicate writes", asy
   });
 
   assert.equal(replay.idempotentReplay, true);
-  assert.equal(model.documents.size, 1);
+  assert.equal(model.documents.get("checkout-123")?.status, DonationStatus.Succeeded);
   assert.equal(audit.entries.length, 2);
   assert.equal(audit.entries[1]?.outcome, "duplicate");
+});
+
+test("DonationCallbackService logs orphaned callbacks when no donation exists", async () => {
+  const model = new DonationModelStub();
+  const audit = new AuditLogServiceStub();
+  const service = buildService(model, audit);
+
+  const result = await service.processStkPushCallback(createPayload(), verification, {
+    rawEventId: "evt-3"
+  });
+
+  assert.equal(result.donation, null);
+  assert.equal(result.idempotentReplay, false);
+  assert.equal(audit.entries.length, 1);
+  assert.equal(audit.entries[0]?.outcome, "missing");
 });
