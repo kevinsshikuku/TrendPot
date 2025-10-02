@@ -23,6 +23,10 @@ export const donationSchema = z.object({
   currency: z.string().length(3),
   status: donationStatusSchema,
   payoutState: donationPayoutStateSchema,
+  payoutBatchId: z.string().nullable().optional(),
+  payoutItemId: z.string().nullable().optional(),
+  availableAt: z.string().nullable().optional(),
+  paidAt: z.string().nullable().optional(),
   statusHistory: z
     .array(
       z.object({

@@ -23,7 +23,9 @@ export const creatorDonationSchema = z.object({
   availableAt: z.string().nullable(),
   supporterName: z.string().nullable(),
   challengeTitle: z.string().nullable(),
-  payoutBatchId: z.string().nullable()
+  payoutBatchId: z.string().nullable(),
+  payoutItemId: z.string().nullable().optional(),
+  paidAt: z.string().nullable().optional()
 });
 export type CreatorDonation = z.infer<typeof creatorDonationSchema>;
 
@@ -59,6 +61,9 @@ export type CreatorDonationConnection = z.infer<typeof creatorDonationConnection
 
 export const payoutBatchStatusSchema = z.enum(["scheduled", "processing", "paid", "failed"]);
 export type PayoutBatchStatus = z.infer<typeof payoutBatchStatusSchema>;
+
+export const payoutItemStatusSchema = z.enum(["pending", "disbursing", "succeeded", "failed"]);
+export type PayoutItemStatus = z.infer<typeof payoutItemStatusSchema>;
 
 export const payoutBatchSchema = z.object({
   id: z.string(),
@@ -126,3 +131,21 @@ export const payoutNotificationConnectionSchema = z.object({
   pageInfo: connectionPageInfoSchema
 });
 export type PayoutNotificationConnection = z.infer<typeof payoutNotificationConnectionSchema>;
+
+export const PAYOUT_SCHEDULING_QUEUE = "payouts:schedule" as const;
+export const PAYOUT_DISBURSEMENT_QUEUE = "payouts:disburse" as const;
+
+export const payoutSchedulingJobSchema = z.object({
+  reason: z.enum(["scheduled", "manual", "retry"]).default("scheduled"),
+  requestedAt: z.string().datetime(),
+  requestId: z.string().optional()
+});
+
+export const payoutDisbursementJobSchema = z.object({
+  payoutItemId: z.string().min(1),
+  attempt: z.number().int().nonnegative().default(0),
+  requestId: z.string().optional()
+});
+
+export type PayoutSchedulingJob = z.infer<typeof payoutSchedulingJobSchema>;
+export type PayoutDisbursementJob = z.infer<typeof payoutDisbursementJobSchema>;

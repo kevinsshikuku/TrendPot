@@ -13,6 +13,9 @@ export class CompanyLedgerEntryEntity {
   @Prop({ type: Number, required: true, default: 0 })
   declare vatCents: number;
 
+  @Prop({ type: Number, required: true, default: 0 })
+  declare expenseCents: number;
+
   @Prop({ type: Number, required: true })
   declare cashDeltaCents: number;
 

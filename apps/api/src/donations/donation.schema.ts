@@ -5,6 +5,7 @@ import { ChallengeEntity } from "../models/challenge.schema";
 import { UserEntity } from "../platform-auth/schemas/user.schema";
 import { PayoutBatchEntity } from "../payouts/schemas/payout-batch.schema";
 import { JournalEntryEntity } from "../ledger/schemas/journal-entry.schema";
+import { PayoutItemEntity } from "../payouts/schemas/payout-item.schema";
 import { DonationStatus } from "./donation-status.enum";
 import { DonationPayoutState } from "./donation-payout-state.enum";
 
@@ -77,8 +78,14 @@ export class DonationEntity {
   @Prop({ type: SchemaTypes.ObjectId, ref: PayoutBatchEntity.name, required: false, default: null })
   declare payoutBatchId?: Types.ObjectId | null;
 
+  @Prop({ type: SchemaTypes.ObjectId, ref: PayoutItemEntity.name, required: false, default: null })
+  declare payoutItemId?: Types.ObjectId | null;
+
   @Prop({ type: SchemaTypes.ObjectId, ref: JournalEntryEntity.name, required: false })
   declare ledgerJournalEntryId?: Types.ObjectId;
+
+  @Prop({ type: SchemaTypes.Date, required: false })
+  declare paidAt?: Date;
 
   @Prop({ type: String, required: false })
   declare supporterName?: string;
@@ -140,3 +147,4 @@ DonationSchema.index({ creatorUserId: 1, payoutState: 1, donatedAt: -1 });
 DonationSchema.index({ mpesaCheckoutRequestId: 1 }, { unique: true, sparse: true });
 DonationSchema.index({ idempotencyKeyHash: 1 }, { unique: true, sparse: true });
 DonationSchema.index({ ledgerJournalEntryId: 1 }, { unique: true, sparse: true });
+DonationSchema.index({ payoutItemId: 1 }, { sparse: true });

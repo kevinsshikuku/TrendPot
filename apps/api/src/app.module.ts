@@ -22,6 +22,7 @@ import { PlatformAuthService } from "./platform-auth/platform-auth.service";
 import { TikTokModule } from "./tiktok/tiktok.module";
 import { DonationEntity, DonationSchema } from "./donations/donation.schema";
 import { DonationsModule } from "./donations/donations.module";
+import { PayoutsModule } from "./payouts/payouts.module";
 import { MpesaWebhookController } from "./webhooks/mpesa.controller";
 import { MpesaSignatureService } from "./webhooks/mpesa-signature.service";
 import { MpesaCallbackQueue } from "./webhooks/mpesa-callback.queue";
@@ -55,7 +56,8 @@ import { RedisService } from "./redis/redis.service";
     ]),
     PlatformAuthModule,
     TikTokModule,
-    DonationsModule
+    DonationsModule,
+    PayoutsModule
   ],
   controllers: [MpesaWebhookController],
   providers: [

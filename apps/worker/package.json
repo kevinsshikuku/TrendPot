@@ -12,6 +12,7 @@
     "test": "NODE_PATH=../../test-shims node --loader ../../test-shims/ts-loader.mjs --test src"
   },
   "dependencies": {
+    "@nestjs/common": "10.3.7",
     "bullmq": "4.11.4",
     "ioredis": "5.4.1",
     "mongoose": "8.3.2",

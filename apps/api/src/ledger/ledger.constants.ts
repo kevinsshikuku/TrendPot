@@ -15,3 +15,4 @@ export const DEFAULT_VAT_RATE = 0.16;
 export const DEFAULT_LEDGER_CURRENCY = "KES";
 
 export const DONATION_SUCCESS_EVENT = "donation.success";
+export const PAYOUT_DISBURSED_EVENT = "payout.disbursed";

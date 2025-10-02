@@ -16,6 +16,10 @@ interface DarajaClientOptions {
   shortCode?: string;
   passkey?: string;
   callbackUrl?: string;
+  b2cInitiatorName?: string;
+  b2cSecurityCredential?: string;
+  b2cResultUrl?: string;
+  b2cQueueTimeoutUrl?: string;
   retry?: RetryOptions;
   fetchImplementation?: typeof fetch;
   cipher?: AesGcmCipher;
@@ -37,6 +41,22 @@ export interface DarajaStkPushResponse {
   ResponseCode: string;
   ResponseDescription: string;
   CustomerMessage: string;
+}
+
+export interface DarajaB2CPayoutRequest {
+  amount: number;
+  phoneNumber: string;
+  remarks?: string;
+  occasion?: string;
+  requestId?: string;
+  logger?: LoggerCandidate;
+}
+
+export interface DarajaB2CPayoutResponse {
+  ConversationID: string;
+  OriginatorConversationID: string;
+  ResponseCode: string;
+  ResponseDescription: string;
 }
 
 interface AccessTokenResponse {
@@ -74,6 +94,10 @@ export class DarajaClient {
   private readonly shortCode: string;
   private readonly passkey: string;
   private readonly callbackUrl: string;
+  private readonly b2cInitiatorName: string;
+  private readonly b2cSecurityCredential: string;
+  private readonly b2cResultUrl: string;
+  private readonly b2cQueueTimeoutUrl: string;
   private readonly retryOptions: RetryOptions;
   private readonly fetchImpl: typeof fetch;
   private readonly cipher: AesGcmCipher;
@@ -93,6 +117,11 @@ export class DarajaClient {
     this.shortCode = options.shortCode ?? process.env.MPESA_SHORT_CODE ?? "";
     this.passkey = options.passkey ?? process.env.MPESA_PASSKEY ?? "";
     this.callbackUrl = options.callbackUrl ?? process.env.MPESA_CALLBACK_URL ?? "";
+    this.b2cInitiatorName = options.b2cInitiatorName ?? process.env.MPESA_B2C_INITIATOR_NAME ?? "";
+    this.b2cSecurityCredential =
+      options.b2cSecurityCredential ?? process.env.MPESA_B2C_SECURITY_CREDENTIAL ?? "";
+    this.b2cResultUrl = options.b2cResultUrl ?? process.env.MPESA_B2C_RESULT_URL ?? "";
+    this.b2cQueueTimeoutUrl = options.b2cQueueTimeoutUrl ?? process.env.MPESA_B2C_TIMEOUT_URL ?? "";
     this.retryOptions = options.retry ?? DEFAULT_RETRY_OPTIONS;
 
     const fetchCandidate = options.fetchImplementation ?? globalThis.fetch;
@@ -149,10 +178,6 @@ export class DarajaClient {
 
     requestLogger.log("Dispatching Daraja STK push", metadata);
     requestLogger.info({ event: "daraja.stkpush.start", ...metadata });
-      requestId: request.requestId,
-      amount: request.amount,
-      shortCode: this.shortCode
-    });
 
     const timestamp = formatTimestamp(new Date());
     const password = Buffer.from(`${this.shortCode}${this.passkey}${timestamp}`).toString("base64");
@@ -205,6 +230,75 @@ export class DarajaClient {
 
     requestLogger.log("Daraja STK push accepted", completionMeta);
     requestLogger.info({ event: "daraja.stkpush.accepted", ...completionMeta });
+
+    return response;
+  }
+
+  async sendB2CPayout(request: DarajaB2CPayoutRequest): Promise<DarajaB2CPayoutResponse> {
+    const requestLogger = this.resolveLogger(request.logger);
+
+    if (!this.b2cInitiatorName || !this.b2cSecurityCredential) {
+      throw new Error("Daraja B2C credentials are not configured.");
+    }
+
+    if (!this.b2cResultUrl || !this.b2cQueueTimeoutUrl) {
+      throw new Error("Daraja B2C callback URLs are not configured.");
+    }
+
+    const metadata = {
+      requestId: request.requestId,
+      amount: request.amount,
+      shortCode: this.shortCode
+    };
+
+    requestLogger.info({ event: "daraja.b2c.start", ...metadata });
+
+    const payload = {
+      InitiatorName: this.b2cInitiatorName,
+      SecurityCredential: this.b2cSecurityCredential,
+      CommandID: "BusinessPayment",
+      Amount: request.amount,
+      PartyA: this.shortCode,
+      PartyB: request.phoneNumber,
+      Remarks: request.remarks ?? "Creator payout",
+      QueueTimeOutURL: this.b2cQueueTimeoutUrl,
+      ResultURL: this.b2cResultUrl,
+      Occasion: request.occasion ?? undefined
+    };
+
+    const response = await withRetries(async () => {
+      const accessToken = await this.getAccessToken(requestLogger);
+
+      const httpResponse = await this.fetchImpl(`${this.baseUrl}/mpesa/b2c/v1/paymentrequest`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!httpResponse.ok) {
+        const body = await httpResponse.text();
+        requestLogger.warn({
+          event: "daraja.b2c.error",
+          status: httpResponse.status,
+          requestId: request.requestId,
+          body
+        });
+        throw new Error(`Daraja B2C payout failed with status ${httpResponse.status}`);
+      }
+
+      return (await httpResponse.json()) as DarajaB2CPayoutResponse;
+    }, this.retryOptions);
+
+    requestLogger.info({
+      event: "daraja.b2c.dispatch",
+      requestId: request.requestId,
+      conversationId: response.ConversationID,
+      originatorConversationId: response.OriginatorConversationID,
+      responseCode: response.ResponseCode
+    });
 
     return response;
   }

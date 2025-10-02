@@ -38,6 +38,12 @@ export class CreatorDonationModel {
 
   @Field({ nullable: true })
   declare payoutBatchId?: string | null;
+
+  @Field({ nullable: true })
+  declare payoutItemId?: string | null;
+
+  @Field(() => GraphQLISODateTime, { nullable: true })
+  declare paidAt?: Date | null;
 }
 
 @ObjectType("CreatorDonationEdge")

@@ -22,6 +22,9 @@ export class WebhookEventEntity {
   @Prop({ required: false, trim: true })
   declare checkoutRequestId?: string;
 
+  @Prop({ required: false, trim: true })
+  declare conversationId?: string;
+
   @Prop({ type: Object })
   declare payload: unknown;
 

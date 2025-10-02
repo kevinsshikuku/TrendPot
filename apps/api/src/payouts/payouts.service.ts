@@ -61,7 +61,9 @@ export class PayoutsService {
         availableAt: doc.availableAt ?? null,
         supporterName: doc.supporterName ?? null,
         challengeTitle: doc.challengeTitle ?? null,
-        payoutBatchId: doc.payoutBatchId ? String(doc.payoutBatchId) : null
+        payoutBatchId: doc.payoutBatchId ? String(doc.payoutBatchId) : null,
+        payoutItemId: doc.payoutItemId ? String(doc.payoutItemId) : null,
+        paidAt: doc.paidAt ?? null
       }
     }));
 

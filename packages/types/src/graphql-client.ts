@@ -281,6 +281,10 @@ const DONATION_QUERY = /* GraphQL */ `
       currency
       status
       payoutState
+      payoutBatchId
+      payoutItemId
+      availableAt
+      paidAt
       statusHistory {
         status
         occurredAt
@@ -319,6 +323,10 @@ const DONATION_BY_CHECKOUT_QUERY = /* GraphQL */ `
       currency
       status
       payoutState
+      payoutBatchId
+      payoutItemId
+      availableAt
+      paidAt
       statusHistory {
         status
         occurredAt
@@ -357,6 +365,10 @@ const REQUEST_STK_PUSH_MUTATION = /* GraphQL */ `
       currency
       status
       payoutState
+      payoutBatchId
+      payoutItemId
+      availableAt
+      paidAt
       statusHistory {
         status
         occurredAt
@@ -458,6 +470,8 @@ const CREATOR_DONATIONS_QUERY = /* GraphQL */ `
           supporterName
           challengeTitle
           payoutBatchId
+          payoutItemId
+          paidAt
         }
       }
       pageInfo {
@@ -837,6 +851,10 @@ const REQUEST_STK_PUSH_MUTATION = /* GraphQL */ `
       currency
       status
       payoutState
+      payoutBatchId
+      payoutItemId
+      availableAt
+      paidAt
       statusHistory {
         status
         occurredAt
@@ -875,6 +893,10 @@ const DONATION_QUERY = /* GraphQL */ `
       currency
       status
       payoutState
+      payoutBatchId
+      payoutItemId
+      availableAt
+      paidAt
       statusHistory {
         status
         occurredAt

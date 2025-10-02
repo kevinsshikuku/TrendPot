@@ -48,6 +48,18 @@ export class DonationModel {
   @Field(() => DonationPayoutState)
   declare payoutState: DonationPayoutState;
 
+  @Field({ nullable: true })
+  declare payoutBatchId?: string | null;
+
+  @Field({ nullable: true })
+  declare payoutItemId?: string | null;
+
+  @Field(() => GraphQLISODateTime, { nullable: true })
+  declare availableAt?: Date | null;
+
+  @Field(() => GraphQLISODateTime, { nullable: true })
+  declare paidAt?: Date | null;
+
   @Field(() => [DonationStatusChangeModel])
   declare statusHistory: DonationStatusChangeModel[];
 

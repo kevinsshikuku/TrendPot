@@ -212,6 +212,7 @@ export class DonationCallbackService {
             updateSet.platformShareCents = distribution.platformShareCents;
             updateSet.platformVatCents = distribution.platformVatCents;
             updateSet.platformFeeCents = existing.platformFeeCents ?? 0;
+            updateSet.availableAt = existing.availableAt ?? now;
           }
 
           if (ledgerJournalEntryId) {

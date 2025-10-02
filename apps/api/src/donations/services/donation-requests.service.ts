@@ -47,6 +47,10 @@ export interface DonationSnapshot {
   currency: string;
   status: DonationStatus;
   payoutState: DonationPayoutState;
+  payoutBatchId: string | null;
+  payoutItemId: string | null;
+  availableAt: Date | null;
+  paidAt: Date | null;
   statusHistory: DonationStatusChange[];
   mpesaCheckoutRequestId: string | null;
   mpesaMerchantRequestId: string | null;
@@ -310,6 +314,10 @@ export class DonationRequestsService {
       currency: document.currency,
       status: document.status,
       payoutState: document.payoutState,
+      payoutBatchId: document.payoutBatchId ? String(document.payoutBatchId) : null,
+      payoutItemId: document.payoutItemId ? String(document.payoutItemId) : null,
+      availableAt: document.availableAt ?? null,
+      paidAt: document.paidAt ?? null,
       statusHistory: history,
       mpesaCheckoutRequestId: document.mpesaCheckoutRequestId ?? null,
       mpesaMerchantRequestId: document.mpesaMerchantRequestId ?? null,

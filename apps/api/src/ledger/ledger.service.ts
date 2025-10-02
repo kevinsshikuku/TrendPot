@@ -4,7 +4,8 @@ import type { ClientSession, Model, Types } from "mongoose";
 import { LedgerConfigService } from "./ledger.config";
 import {
   LEDGER_ACCOUNT_CODES,
-  DONATION_SUCCESS_EVENT
+  DONATION_SUCCESS_EVENT,
+  PAYOUT_DISBURSED_EVENT
 } from "./ledger.constants";
 import {
   CompanyLedgerEntryEntity,
@@ -35,6 +36,18 @@ interface RecordDonationSuccessParams {
 export interface LedgerPostingResult {
   journalEntryId: Types.ObjectId;
   created: boolean;
+}
+
+interface RecordPayoutDisbursementParams {
+  session: ClientSession;
+  payoutItemId: string;
+  amountCents: number;
+  feeCents: number;
+  creatorUserId: Types.ObjectId;
+  walletId: Types.ObjectId;
+  currency: string;
+  disbursedAt: Date;
+  receipt?: string;
 }
 
 const isDuplicateKeyError = (error: unknown): boolean => {
@@ -141,6 +154,7 @@ export class LedgerService {
             journalEntryId: journal._id,
             revenueCents: params.commissionNetCents,
             vatCents: params.vatCents,
+            expenseCents: 0,
             cashDeltaCents: params.amountCents,
             currency
           }
@@ -156,6 +170,117 @@ export class LedgerService {
 
       const existingJournal = await this.journalModel
         .findOne({ eventType: DONATION_SUCCESS_EVENT, eventRefId: params.donationId })
+        .session(params.session)
+        .exec();
+
+      if (!existingJournal) {
+        throw error;
+      }
+
+      return { journalEntryId: existingJournal._id, created: false };
+    }
+  }
+
+  async recordPayoutDisbursement(params: RecordPayoutDisbursementParams): Promise<LedgerPostingResult> {
+    const existing = await this.journalModel
+      .findOne({ eventType: PAYOUT_DISBURSED_EVENT, eventRefId: params.payoutItemId })
+      .session(params.session)
+      .exec();
+
+    if (existing) {
+      return { journalEntryId: existing._id, created: false };
+    }
+
+    const cashOutflowCents = params.amountCents + params.feeCents;
+
+    try {
+      const [journal] = await this.journalModel.create(
+        [
+          {
+            batchId: params.payoutItemId,
+            eventType: PAYOUT_DISBURSED_EVENT,
+            eventRefId: params.payoutItemId,
+            lines: [
+              {
+                accountCode: LEDGER_ACCOUNT_CODES.LIABILITY_CREATORS_PAYABLE,
+                debitCents: params.amountCents,
+                creditCents: 0
+              },
+              ...(params.feeCents > 0
+                ? [
+                    {
+                      accountCode: LEDGER_ACCOUNT_CODES.EXPENSE_PAYOUT_FEES,
+                      debitCents: params.feeCents,
+                      creditCents: 0
+                    }
+                  ]
+                : []),
+              {
+                accountCode: LEDGER_ACCOUNT_CODES.CASH_MPESA_PAYBILL,
+                debitCents: 0,
+                creditCents: cashOutflowCents
+              }
+            ],
+            currency: params.currency || this.config.getLedgerCurrency(),
+            postedAt: params.disbursedAt,
+            state: "posted"
+          }
+        ],
+        { session: params.session }
+      );
+
+      const wallet = await this.walletModel
+        .findOneAndUpdate(
+          { _id: params.walletId },
+          {
+            $inc: {
+              pendingCents: -params.amountCents
+            }
+          },
+          { new: true, session: params.session }
+        )
+        .exec();
+
+      if (!wallet) {
+        throw new Error("Wallet not found when recording payout disbursement.");
+      }
+
+      await this.walletLedgerModel.create(
+        [
+          {
+            walletId: wallet._id,
+            journalEntryId: journal._id,
+            deltaCents: -params.amountCents,
+            type: "debit",
+            reason: "payout_disbursed",
+            metadata: params.receipt ? { receipt: params.receipt } : undefined
+          }
+        ],
+        { session: params.session }
+      );
+
+      await this.companyLedgerModel.create(
+        [
+          {
+            journalEntryId: journal._id,
+            revenueCents: 0,
+            vatCents: 0,
+            expenseCents: params.feeCents,
+            cashDeltaCents: -cashOutflowCents,
+            currency: params.currency || this.config.getLedgerCurrency()
+          }
+        ],
+        { session: params.session }
+      );
+
+      return { journalEntryId: journal._id, created: true };
+    } catch (error) {
+      if (!isDuplicateKeyError(error)) {
+        throw error;
+      }
+
+      const existingJournal = await this.journalModel
+        .findOne({ eventType: PAYOUT_DISBURSED_EVENT, eventRefId: params.payoutItemId })
         .session(params.session)
         .exec();
 

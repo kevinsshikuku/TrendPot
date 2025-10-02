@@ -204,6 +204,10 @@ type Donation {
   currency: String!
   status: DonationStatus!
   payoutState: DonationPayoutState!
+  payoutBatchId: String
+  payoutItemId: String
+  availableAt: DateTime
+  paidAt: DateTime
   statusHistory: [DonationStatusChange!]!
   mpesaCheckoutRequestId: String
   mpesaMerchantRequestId: String

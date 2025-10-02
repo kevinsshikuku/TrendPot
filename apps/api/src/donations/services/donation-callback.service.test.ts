@@ -28,6 +28,7 @@ interface DonationRecord {
   platformShareCents: number;
   platformVatCents: number;
   ledgerJournalEntryId?: Types.ObjectId | string | null;
+  availableAt?: Date;
 }
 
 class DonationModelStub {
@@ -112,6 +113,7 @@ class DonationModelStub {
         match.platformVatCents = patched.platformVatCents ?? match.platformVatCents;
         match.platformFeeCents = patched.platformFeeCents ?? match.platformFeeCents;
         match.ledgerJournalEntryId = patched.ledgerJournalEntryId ?? match.ledgerJournalEntryId;
+        match.availableAt = patched.availableAt ?? match.availableAt;
 
         const push = (update as { $push?: { statusHistory?: unknown } } | undefined)?.$push;
         if (push?.statusHistory) {
@@ -289,6 +291,7 @@ test("DonationCallbackService updates existing donations and records audit entri
   assert.equal(persisted?.platformShareCents, 1293);
   assert.equal(persisted?.platformVatCents, 207);
   assert.equal(persisted?.ledgerJournalEntryId, "journal-1");
+  assert.ok(persisted?.availableAt instanceof Date);
 });
 
 test("DonationCallbackService marks idempotent replays and avoids duplicate writes", async () => {
