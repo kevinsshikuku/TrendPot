@@ -1,9 +1,13 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { Queue, Worker, QueueEvents, JobsOptions } from "bullmq";
 import type { Redis } from "ioredis";
+import {
+  DonationCallbackService,
+  MpesaCallbackMetadata,
+  MpesaStkPushCallbackPayload
+} from "../donations/services/donation-callback.service";
 import { apiLogger } from "../observability/logger";
 import { RedisService } from "../redis/redis.service";
-import { DonationService, MpesaCallbackMetadata, MpesaStkPushCallbackPayload } from "../donations/donation.service";
 import type { SignatureVerificationResult } from "./mpesa-signature.service";
 
 export interface MpesaCallbackJobData {
@@ -32,7 +36,7 @@ export class MpesaCallbackQueue implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly redisService: RedisService,
-    private readonly donationService: DonationService
+    private readonly donationCallbackService: DonationCallbackService
   ) {}
 
   async onModuleInit() {
@@ -58,7 +62,7 @@ export class MpesaCallbackQueue implements OnModuleInit, OnModuleDestroy {
         QUEUE_NAME,
         async (job) => {
           this.logger.info({ event: "mpesa.queue.job.start", jobId: job.id }, "Processing webhook job");
-          await this.donationService.processStkPushCallback(
+          await this.donationCallbackService.processStkPushCallback(
             job.data.payload,
             job.data.verification,
             job.data.metadata
@@ -98,7 +102,7 @@ export class MpesaCallbackQueue implements OnModuleInit, OnModuleDestroy {
         { event: "mpesa.queue.inline", rawEventId: job.metadata.rawEventId },
         "Queue unavailable; processing callback inline"
       );
-      await this.donationService.processStkPushCallback(job.payload, job.verification, job.metadata);
+      await this.donationCallbackService.processStkPushCallback(job.payload, job.verification, job.metadata);
       return;
     }
 

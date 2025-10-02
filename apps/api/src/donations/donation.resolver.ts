@@ -2,22 +2,19 @@ import { UnauthorizedException } from "@nestjs/common";
 import { Args, Context, Mutation, Query, Resolver } from "@nestjs/graphql";
 import { RateLimit, RequireProfileFields, Roles } from "../auth/auth.decorators";
 import type { GraphQLContext } from "../observability/graphql-context";
-import { DonationService } from "./donation.service";
+import { DonationRequestsService } from "./services/donation-requests.service";
 import { DonationModel } from "./models/donation.model";
 import { RequestDonationInputModel } from "./models/request-donation.input";
 
 @Resolver(() => DonationModel)
 export class DonationResolver {
-  constructor(private readonly donationService: DonationService) {}
+  constructor(private readonly donationRequests: DonationRequestsService) {}
 
   @Roles("fan", "creator", "operator", "admin")
   @RequireProfileFields("displayName", "phone")
   @RateLimit({ windowMs: 60_000, max: 6 })
   @Mutation(() => DonationModel, { name: "requestStkPush" })
-  async requestStkPush(
-    @Args("input") input: RequestDonationInputModel,
-    @Context() context: GraphQLContext
-  ) {
+  async requestStkPush(@Args("input") input: RequestDonationInputModel, @Context() context: GraphQLContext) {
     if (!context.user) {
       throw new UnauthorizedException("Authentication required.");
     }
@@ -27,7 +24,7 @@ export class DonationResolver {
         ? context.logger.child({ module: "donations", requestId: context.requestId })
         : context.logger;
 
-    return this.donationService.requestStkPush({
+    return this.donationRequests.requestStkPush({
       submissionId: input.submissionId,
       donorUserId: context.user.id,
       amountCents: input.amountCents,
@@ -47,7 +44,7 @@ export class DonationResolver {
       throw new UnauthorizedException("Authentication required.");
     }
 
-    return this.donationService.getDonationById(id);
+    return this.donationRequests.getDonationById(id);
   }
 
   @Roles("fan", "creator", "operator", "admin")
@@ -60,6 +57,6 @@ export class DonationResolver {
       throw new UnauthorizedException("Authentication required.");
     }
 
-    return this.donationService.getDonationByCheckoutRequestId(checkoutRequestId);
+    return this.donationRequests.getDonationByCheckoutRequestId(checkoutRequestId);
   }
 }

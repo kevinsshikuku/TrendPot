@@ -4,7 +4,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import type { Model } from "mongoose";
 import { apiLogger } from "../observability/logger";
 import { AuditLogService } from "../audit/audit-log.service";
-import { MpesaCallbackMetadata, MpesaStkPushCallbackPayload } from "../donations/donation.service";
+import { MpesaCallbackMetadata, MpesaStkPushCallbackPayload } from "../donations/services/donation-callback.service";
 import { MpesaCallbackQueue } from "./mpesa-callback.queue";
 import { MpesaSignatureService } from "./mpesa-signature.service";
 import { WebhookEventDocument, WebhookEventEntity } from "./webhook-event.schema";

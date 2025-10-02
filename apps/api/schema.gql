@@ -26,7 +26,16 @@ enum SubmissionState {
 
 enum DonationStatus {
   PENDING
-  SUBMITTED
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+enum DonationPayoutState {
+  UNASSIGNED
+  SCHEDULED
+  PROCESSING
   PAID
   FAILED
 }
@@ -184,10 +193,17 @@ type DonationStatusChange {
 type Donation {
   id: String!
   submissionId: String!
+  challengeId: String!
+  creatorUserId: String!
   donorUserId: String!
   amountCents: Int!
+  platformFeeCents: Int!
+  creatorShareCents: Int!
+  platformShareCents: Int!
+  platformVatCents: Int!
   currency: String!
   status: DonationStatus!
+  payoutState: DonationPayoutState!
   statusHistory: [DonationStatusChange!]!
   mpesaCheckoutRequestId: String
   mpesaMerchantRequestId: String
