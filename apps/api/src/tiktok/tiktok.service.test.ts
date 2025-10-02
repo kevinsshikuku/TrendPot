@@ -1,20 +1,28 @@
+import assert from "node:assert/strict";
 import test from "node:test";
 
 import { BadRequestException } from "@nestjs/common";
 import { Types } from "mongoose";
 import type { Logger } from "pino";
 
+import type { AuthenticatedUser } from "../auth/auth.types";
 import { TikTokDisplayService } from "./tiktok.service";
 
-const createLogger = (): Logger =>
-  ({
+const createLogger = (): Logger => {
+  const stub: any = {
+    level: "info",
     debug: () => undefined,
     info: () => undefined,
     warn: () => undefined,
     error: () => undefined,
     fatal: () => undefined,
-    level: "info"
-  } as unknown as Logger);
+    trace: () => undefined
+  };
+
+  stub.child = () => stub;
+
+  return stub as Logger;
+};
 
 const createVideoModel = () => {
   const store = new Map<string, any>();
@@ -83,6 +91,24 @@ const createAccount = () => ({
   _id: new Types.ObjectId(),
   username: "creator123"
 });
+
+const encodeCursor = (payload: { postedAt: Date; id: Types.ObjectId; apiCursor?: string | null }) => {
+  return Buffer.from(
+    JSON.stringify({
+      postedAt: payload.postedAt.toISOString(),
+      id: payload.id.toHexString(),
+      apiCursor: payload.apiCursor ?? null
+    })
+  ).toString("base64");
+};
+
+const decodeCursor = (cursor: string) => {
+  return JSON.parse(Buffer.from(cursor, "base64").toString("utf8")) as {
+    postedAt: string;
+    id: string;
+    apiCursor: string | null;
+  };
+};
 
 test("TikTokDisplayService.ensureVideoAvailable persists the video when /video/data returns a matching entry", async () => {
     const { service, videoModel, responses, paths } = createService();
@@ -157,48 +183,6 @@ test("TikTokDisplayService.ensureVideoAvailable throws when /video/data cannot l
 
     assert.deepStrictEqual(paths, ["/v2/video/data/"]);
 });
-
-=======
-import { test } from "node:test";
-import { Types } from "mongoose";
-import type { Logger } from "pino";
-
-import type { AuthenticatedUser } from "../auth/auth.types";
-import { TikTokDisplayService } from "./tiktok.service";
-
-const encodeCursor = (payload: { postedAt: Date; id: Types.ObjectId; apiCursor?: string | null }) => {
-  return Buffer.from(
-    JSON.stringify({
-      postedAt: payload.postedAt.toISOString(),
-      id: payload.id.toHexString(),
-      apiCursor: payload.apiCursor ?? null
-    })
-  ).toString("base64");
-};
-
-const decodeCursor = (cursor: string) => {
-  return JSON.parse(Buffer.from(cursor, "base64").toString("utf8")) as {
-    postedAt: string;
-    id: string;
-    apiCursor: string | null;
-  };
-};
-
-const createLoggerStub = (): Logger => {
-  const stub: any = {
-    level: "info",
-    info: () => undefined,
-    warn: () => undefined,
-    error: () => undefined,
-    debug: () => undefined,
-    trace: () => undefined,
-    fatal: () => undefined
-  };
-
-  stub.child = () => stub;
-
-  return stub as Logger;
-};
 
 test("listCreatorVideos paginates TikTok responses and encodes next cursor", async () => {
   const accountId = new Types.ObjectId();
@@ -343,7 +327,7 @@ test("listCreatorVideos paginates TikTok responses and encodes next cursor", asy
     apiCursor: "cursor-prev"
   });
 
-  const logger = createLoggerStub();
+  const logger = createLogger();
 
   const result = await service.listCreatorVideos({
     user,
@@ -374,4 +358,5 @@ test("listCreatorVideos paginates TikTok responses and encodes next cursor", asy
   assert.equal(accountUpdateCalls.length, 1);
   assert.equal(auditLogs.length, 1);
   assert.match((auditLogs[0] as { context: { summary: string } }).context.summary, /Fetched 4 TikTok videos/);
+});
 
